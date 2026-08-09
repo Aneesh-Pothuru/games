@@ -200,6 +200,13 @@ body {
   touch-action: manipulation;
 }
 
+/* Load-bearing. Without an explicit height here, `.screen { height: 100% }`
+   resolves against an auto-height parent and collapses to content height, so
+   the .flow scroll container ends up exactly as tall as its content and never
+   scrolls — while body's overflow:hidden silently clips everything past the
+   fold. That made every screen taller than the viewport unreachable. */
+#app { height: 100%; }
+
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; touch-action: manipulation; }
 /* Never below 16px computed or iOS Safari zooms the viewport on focus. */
@@ -287,6 +294,10 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .stack { display: flex; flex-direction: column; gap: var(--sp-4); }
 .stack--tight { gap: var(--sp-2); }
 .row { display: flex; align-items: center; gap: var(--sp-3); }
+/* Two equal choices side by side — used where neither is the safe default and
+   giving one of them more width would be a thumb on the scale. */
+.row--split { width: 100%; }
+.row--split > * { flex: 1 1 0; min-width: 0; }
 .grow { flex: 1; min-width: 0; }
 
 /* --------------------------------------------------------------- buttons -- */
@@ -448,6 +459,9 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 
 /* ---------------------------------------------------------- player tiles -- */
 .plist { display: flex; flex-direction: column; gap: var(--sp-2); }
+/* A tappable tile is a <button> inside its <li>, so the list keeps its
+   semantics; display:contents makes the button the flex item as before. */
+.ptile__slot { display: contents; }
 .ptile {
   position: relative; display: flex; align-items: center; gap: var(--sp-3);
   min-height: 64px; padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
@@ -607,6 +621,18 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
    even though a chip used as a static label does not. */
 button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 
+/* Hold-to-peek role chip. Masked by default so a glance from across the table
+   gets nothing; the label text is swapped, not merely hidden, so it is absent
+   from the DOM at rest. */
+.chip--peek { color: var(--text-3); }
+.chip--peek .chip__masked { font-variant: small-caps; letter-spacing: 0.06em; }
+.chip--peek::before {
+  content: ''; width: 9px; height: 9px; border-radius: 2px;
+  background: currentColor; opacity: 0.5;
+}
+.chip--peek.is-peeking { box-shadow: inset 0 0 0 2px currentColor; }
+.chip--peek.is-peeking::before { opacity: 1; border-radius: 50%; }
+
 /* --------------------------------------------------------------- banners -- */
 .banner {
   padding: var(--sp-3) var(--sp-4); border-radius: var(--r-3);
@@ -698,6 +724,30 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 /* These are spans inside a span, so they need to be told to stack. */
 .gametile__name { display: block; font-size: var(--t-lg); font-weight: 700; line-height: 1.15; }
 .gametile__meta { display: block; font-size: var(--t-xs); color: var(--text-3); margin-top: 2px; }
+/* The recognisable name. Deliberately high-contrast and directly under the
+   title -- it is what most people scan for. */
+/* One step below the game name, accent-coloured: this is the line most people
+   actually scan for, so it must not be the smallest text on the tile. */
+.gametile__familiar {
+  display: block; margin-top: 3px;
+  font-size: var(--t-sm); font-weight: 700; color: var(--game-accent);
+}
+
+/* Join collapses to a single row so the game list clears the fold. */
+/* Tighter rhythm on the home screen only: every 16px here pushes the game
+   list further below the fold on a small phone. */
+.home.stack { gap: var(--sp-3); }
+.home .flow { padding-top: var(--sp-4); }
+.joinrow { display: flex; gap: var(--sp-2); align-items: stretch; }
+.joinrow .input--code {
+  flex: 1; min-height: var(--tap); font-size: 1.35rem; letter-spacing: 0.2em;
+  text-indent: 0.2em; min-width: 0;
+}
+.joinrow .btn { flex: 0 0 auto; padding-inline: var(--sp-4); }
+
+/* The start bar carries the name field and the button together, so the field is
+   never scrolled away from the action that needs it. */
+.bar--bottom .input { margin-bottom: var(--sp-2); }
 
 .secret {
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
@@ -719,6 +769,125 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
   font-size: var(--t-xs); font-weight: 700; color: var(--text-2);
 }
 .seg button[aria-pressed='true'] { background: var(--bg-hover); color: var(--text-1); box-shadow: var(--e-1); }
+
+/* ---------------------------------------------------------- playing cards - */
+/* Cards are typography, not artwork: no images, no web fonts, nothing to load.
+   The rank sits top-left and the suit fills the body, so a card is still
+   readable when it is 26px wide in a seat row. */
+.pcard {
+  --pc-w: 46px;
+  position: relative; display: inline-flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  width: var(--pc-w); height: calc(var(--pc-w) * 1.4);
+  border-radius: calc(var(--pc-w) * 0.13);
+  background: #f6f3ea; color: #14181f;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5), inset 0 0 0 var(--hair) rgba(0, 0, 0, 0.28);
+  font-variant-numeric: tabular-nums; line-height: 1; user-select: none;
+}
+.pcard--xs { --pc-w: 22px; }
+.pcard--sm { --pc-w: 32px; }
+.pcard--md { --pc-w: 46px; }
+.pcard--lg { --pc-w: 74px; }
+.pcard__rank { font-size: calc(var(--pc-w) * 0.44); font-weight: 800; letter-spacing: -0.02em; }
+.pcard__suit { font-size: calc(var(--pc-w) * 0.4); line-height: 1; }
+.pcard--red { color: #c62f28; }
+.pcard--black { color: #14181f; }
+.pcard.is-dim { opacity: 0.42; }
+/* The winning five, marked with a ring rather than a colour — colour alone
+   would be invisible to a third of the table's eyes on a phone in a bar. */
+.pcard.is-best { box-shadow: 0 0 0 2px var(--success), 0 2px 8px rgba(0, 0, 0, 0.45); }
+/* background-color and background-image separately, on purpose: `background:`
+   is a shorthand, so a later background-image would wipe the colour out and
+   leave a card back you can see straight through. */
+.pcard--back {
+  color: transparent;
+  background-color: var(--bg-overlay);
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--line-strong) 0 2px,
+    transparent 2px 7px
+  );
+  box-shadow: inset 0 0 0 var(--hair) var(--line-2);
+}
+.pcard--slot {
+  background: none; box-shadow: inset 0 0 0 var(--hair) var(--line); opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------- holdem -- */
+.pokerpot {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2);
+}
+.pokerpot__amt { font-size: var(--t-xl); font-weight: 800; color: var(--game-accent); font-variant-numeric: tabular-nums; }
+.pokerboard {
+  display: flex; gap: var(--sp-2); justify-content: center; align-items: center;
+  padding: var(--sp-3) var(--sp-2); border-radius: var(--r-3);
+  background: var(--bg-inset); box-shadow: inset 0 0 0 var(--hair) var(--line);
+  /* Five cards must fit at 320px. They shrink rather than wrap or overflow. */
+  min-width: 0;
+}
+.pokerboard .pcard { --pc-w: min(46px, 16vw); flex: 0 0 auto; }
+
+.pokerhand {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-3); border-radius: var(--r-3);
+  background: var(--bg-raised); box-shadow: inset 0 0 0 var(--hair) var(--line);
+}
+.pokerhand.is-folded { opacity: 0.6; }
+.pokerhand__cards { display: flex; gap: var(--sp-2); flex: 0 0 auto; }
+.pokerhand__meta { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.pokerhand__name { font-size: var(--t-md); color: var(--text-1); }
+.pokerpeek { display: inline-flex; gap: 2px; }
+.bdg--btn { font-weight: 800; font-size: var(--t-2xs); color: var(--text-1); box-shadow: inset 0 0 0 var(--hair) var(--line-strong); }
+
+/* Fold is fixed-width and separated; check/call is the widest, safest target. */
+.pokeract { display: flex; gap: var(--sp-2); width: 100%; }
+.pokeract .btn { flex: 1 1 0; min-width: 0; padding-inline: var(--sp-2); }
+.pokeract .btn--danger { flex: 0 0 auto; min-width: 84px; }
+
+.raise { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; }
+.raise__head { display: flex; align-items: baseline; justify-content: space-between; }
+.raise__amt { font-size: var(--t-xl); font-weight: 800; color: var(--game-accent); font-variant-numeric: tabular-nums; }
+.raise__slider { width: 100%; height: var(--tap); background: none; }
+.raise__slider::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: var(--bg-inset); }
+.raise__slider::-moz-range-track { height: 8px; border-radius: 999px; background: var(--bg-inset); }
+.raise__slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; margin-top: -12px;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--game-accent); box-shadow: var(--e-2);
+}
+.raise__slider::-moz-range-thumb {
+  width: 32px; height: 32px; border: none; border-radius: 50%;
+  background: var(--game-accent); box-shadow: var(--e-2);
+}
+.seg--wrap { flex-wrap: wrap; }
+.seg--wrap button { flex: 1 1 0; }
+
+/* ----------------------------------------------------------------- cheat -- */
+/* Ten-plus cards on a 320px screen: a wrapping grid, not a row that scrolls.
+   Anything you have to scroll to find, you forget you have. */
+.cheathand {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2);
+  padding: var(--sp-3); border-radius: var(--r-3);
+  background: var(--bg-inset); box-shadow: inset 0 0 0 var(--hair) var(--line);
+}
+.cheatcard {
+  padding: 0; border-radius: calc(46px * 0.13); line-height: 0;
+  /* The tap target is the whole card, and a card is already thumb-sized. */
+  transition: transform 120ms ease;
+}
+.cheatcard[disabled] { opacity: 0.75; }
+.cheatcard.is-picked { transform: translateY(-10px); }
+.cheatcard.is-picked .pcard { box-shadow: 0 0 0 3px var(--game-accent), 0 6px 12px rgba(0, 0, 0, 0.4); }
+
+.cheatpile {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-3);
+  background: var(--bg-raised); box-shadow: inset 0 0 0 var(--hair) var(--line);
+}
+/* Overlapped, so the pile reads as a pile rather than a hand. */
+.cheatpile__stack { display: flex; flex: 0 0 auto; }
+.cheatpile__stack .pcard + .pcard { margin-left: -32px; }
+.cheatpile__n { font-size: var(--t-xl); font-weight: 800; color: var(--game-accent); font-variant-numeric: tabular-nums; }
 
 /* ------------------------------------------------------------ reveal log -- */
 .log { display: flex; flex-direction: column; gap: var(--sp-2); }

@@ -44,6 +44,11 @@ jobs:
       - name: Browser tests on phone viewports
         run: npm run test:browser
 
+      # The paths that used to dead-end: host disappears, arriving mid-round,
+      # a full room. Each of these is only observable through the real UI.
+      - name: User journeys
+        run: npm run test:journeys
+
       - name: Worker log on failure
         if: failure()
         run: cat /tmp/wrangler.log || true

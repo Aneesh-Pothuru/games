@@ -63,6 +63,10 @@ export class Lobby extends DurableObject {
   async #load() {
     if (this.room === undefined) {
       this.room = (await this.ctx.storage.get(STORAGE_KEY)) ?? null;
+      // Rooms persisted before the waiting list existed are still live in
+      // storage for up to the TTL, so give them the field rather than
+      // scattering `?? []` across every read.
+      if (this.room && !this.room.waiting) this.room.waiting = [];
     }
     return this.room;
   }
@@ -97,10 +101,23 @@ export class Lobby extends DurableObject {
 
   // ---------------------------------------------------------------- fan-out --
 
-  /** Presence is derived, never stored. Costs zero writes. */
-  #onlineIds() {
+  /**
+   * Presence is derived, never stored. Costs zero writes.
+   *
+   * `exclude` is the socket currently being torn down. Inside webSocketClose
+   * the runtime still hands that socket back from getWebSockets(), so without
+   * this the departing player counts as online in the very broadcast that
+   * exists to announce they left — and since nothing broadcasts again until
+   * someone acts, they stayed "online" forever. That is why a host closing
+   * their tab left the room looking healthy and completely stuck.
+   */
+  #onlineIds(exclude = null) {
     const ids = new Set();
     for (const ws of this.ctx.getWebSockets()) {
+      if (ws === exclude) continue;
+      // CLOSING or CLOSED. Belt and braces for a socket the runtime has not
+      // reaped yet; an undefined readyState falls through unfiltered.
+      if (ws.readyState === 2 || ws.readyState === 3) continue;
       const att = ws.deserializeAttachment();
       if (att?.pid) ids.add(att.pid);
     }
@@ -118,19 +135,26 @@ export class Lobby extends DurableObject {
   #pushTo(ws, online = this.#onlineIds()) {
     const att = ws.deserializeAttachment();
     if (!att?.pid) return;
+    // Someone waiting for the next round gets NO game view. Handing them a
+    // viewFor() built for an unrecognised id would be trusting every game
+    // module to redact a case none of them were written for; not sending it is
+    // the only version of that guarantee that cannot rot.
+    const seated = this.room.players.some((p) => p.id === att.pid);
     this.#send(ws, {
       t: S.STATE,
       seq: this.room.seq,
       you: att.pid,
       room: publicRoom(this.room, online),
       // Redaction happens here, per viewer, inside the game module.
-      view: this.room.game ? GAMES[this.room.gameId].viewFor(this.room, att.pid) : null,
+      view: seated && this.room.game ? GAMES[this.room.gameId].viewFor(this.room, att.pid) : null,
     });
   }
 
-  #broadcast() {
-    const online = this.#onlineIds();
-    for (const ws of this.ctx.getWebSockets()) this.#pushTo(ws, online);
+  #broadcast(exclude = null) {
+    const online = this.#onlineIds(exclude);
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws !== exclude) this.#pushTo(ws, online);
+    }
   }
 
   #announce(event) {
@@ -156,6 +180,10 @@ export class Lobby extends DurableObject {
       expiresAt: now + LOBBY_TTL_MS,
       config: { ...GAMES[gameId].defaultConfig },
       players: [host],
+      // Arrivals during a round. They are deliberately NOT in `players`: every
+      // game module treats that array as the table, and quietly growing it
+      // mid-hand would corrupt whatever is in progress.
+      waiting: [],
       scores: {},
       game: null,
       lastResult: null,
@@ -172,6 +200,8 @@ export class Lobby extends DurableObject {
       gameName: GAMES[room.gameId].meta.name,
       hostName: room.players.find((p) => p.id === room.hostId)?.name ?? '',
       playerCount: room.players.length,
+      waitingCount: room.waiting.length,
+      maxPlayers: GAMES[room.gameId].meta.maxPlayers,
       inProgress: room.phase !== 'lobby',
     };
   }
@@ -179,10 +209,29 @@ export class Lobby extends DurableObject {
   async join(name) {
     const room = await this.#load();
     if (!room || Date.now() >= room.expiresAt) return { error: 'not_found' };
-    if (room.phase !== 'lobby') return { error: 'in_progress' };
-    if (room.players.length >= MAX_PLAYERS) return { error: 'room_full' };
+    // The per-game maximum, not just the global one. Letting a tenth player
+    // into a nine-handed poker room only moves the failure to the Start
+    // button, where it is the host's problem instead of the joiner's.
+    const cap = Math.min(MAX_PLAYERS, GAMES[room.gameId].meta.maxPlayers);
+    const seated = room.players.length + room.waiting.length;
+    if (seated >= cap) return { error: 'room_full' };
 
-    const player = newPlayer(dedupeName(name, room.players), room.players.length);
+    const taken = [...room.players, ...room.waiting];
+
+    // Someone arriving mid-round used to be told "that game has already
+    // started" and left with nowhere to go — and because a room never returns
+    // to the lobby phase, they could not get in for the rest of the night.
+    // They now hold a seat for the next round.
+    if (room.phase !== 'lobby') {
+      const player = newPlayer(dedupeName(name, taken), -1);
+      room.waiting.push(player);
+      await this.#commit();
+      this.#broadcast();
+      this.#announce({ kind: 'waiting', name: player.name });
+      return { pid: player.id, tok: player.tok, waiting: true };
+    }
+
+    const player = newPlayer(dedupeName(name, taken), room.players.length);
     room.players.push(player);
     await this.#commit();
     this.#broadcast();
@@ -198,7 +247,7 @@ export class Lobby extends DurableObject {
     const tok = url.searchParams.get('tok') ?? '';
 
     const room = await this.#load();
-    const seat = room?.players.find((p) => p.id === pid);
+    const seat = room && [...room.players, ...room.waiting].find((p) => p.id === pid);
     if (!room || !seat || seat.tok !== tok || Date.now() >= room.expiresAt) {
       return new Response('bad session', { status: 403 });
     }
@@ -260,10 +309,32 @@ export class Lobby extends DurableObject {
 
   async #handle(ws, pid, msg) {
     const room = this.room;
-    const me = room.players.find((p) => p.id === pid);
-    if (!me) return ws.close(CLOSE.NO_SESSION, 'no seat');
-
     const reject = (why) => this.#send(ws, { t: S.REJECT, why, ref: msg.ref ?? null });
+
+    const me = room.players.find((p) => p.id === pid);
+    if (!me) {
+      // Waiting for the next round: they can watch the room fill and they can
+      // give up, and that is the whole of it. Every other message would act on
+      // a game they are not in.
+      const held = room.waiting.find((p) => p.id === pid);
+      if (!held) return ws.close(CLOSE.NO_SESSION, 'no seat');
+      if (msg.t === C.RESYNC) return this.#pushTo(ws);
+      if (msg.t === C.LEAVE) {
+        room.waiting = room.waiting.filter((p) => p.id !== pid);
+        await this.#commit();
+        this.#broadcast();
+        return ws.close(1000, 'left');
+      }
+      if (msg.t === C.SET_NAME) {
+        const name = sanitizeName(msg.name);
+        if (!name) return reject('name_required');
+        held.name = dedupeName(name, [...room.players, ...room.waiting], held.id);
+        await this.#commit();
+        return this.#broadcast();
+      }
+      return reject('waiting_for_next_round');
+    }
+
     const isHost = room.hostId === pid;
 
     switch (msg.t) {
@@ -299,10 +370,45 @@ export class Lobby extends DurableObject {
         return this.#broadcast();
       }
 
+      /**
+       * The host closes their tab and the room is stuck forever: nobody else
+       * can start, nobody can hand it over, and the only way out is for six
+       * people to leave and set the whole thing up again.
+       *
+       * So the host role can be TAKEN, but only while the host has no live
+       * socket. Presence is derived, so "gone" here means genuinely gone and
+       * not merely idle, and a host who is still connected cannot be deposed
+       * by whoever taps fastest.
+       */
+      case C.CLAIM_HOST: {
+        if (isHost) return;
+        if (this.#onlineIds().has(room.hostId)) return reject('host_is_here');
+        room.hostId = pid;
+        await this.#commit();
+        this.#announce({ kind: 'newHost', name: me.name });
+        return this.#broadcast();
+      }
+
       case C.KICK: {
         if (!isHost) return reject('host_only');
-        if (room.phase !== 'lobby') return reject('already_started');
         if (msg.playerId === pid) return reject('cannot_kick_self');
+        // Someone on the waiting list can be removed at any time; removing a
+        // seated player mid-round would tear a hole in the game state.
+        const held = room.waiting.findIndex((p) => p.id === msg.playerId);
+        if (held !== -1) {
+          const [dropped] = room.waiting.splice(held, 1);
+          await this.#commit();
+          for (const sock of this.ctx.getWebSockets(`p:${dropped.id}`)) {
+            try {
+              sock.close(CLOSE.NO_SESSION, 'removed');
+            } catch {
+              /* already closing */
+            }
+          }
+          this.#announce({ kind: 'kicked', name: dropped.name });
+          return this.#broadcast();
+        }
+        if (room.phase !== 'lobby') return reject('already_started');
         const idx = room.players.findIndex((p) => p.id === msg.playerId);
         if (idx === -1) return reject('no_such_player');
         const [gone] = room.players.splice(idx, 1);
@@ -364,6 +470,13 @@ export class Lobby extends DurableObject {
 
     // Players who left the lobby mid-game are dropped before a new round.
     room.players = room.players.filter((p) => !p.left);
+    // …and anyone who arrived during the last one is dealt in for this one.
+    // Trimmed to the game's own maximum, since dropping out is what freed the
+    // seats and there may not be enough of them.
+    const cap = Math.min(MAX_PLAYERS, game.meta.maxPlayers);
+    while (room.waiting.length && room.players.length < cap) {
+      room.players.push(room.waiting.shift());
+    }
     reseat(room.players);
     if (!room.players.some((p) => p.id === room.hostId) && room.players.length) {
       room.hostId = room.players[0].id;
@@ -389,7 +502,7 @@ export class Lobby extends DurableObject {
     // otherwise a clean reconnect blinks the player offline mid-vote for
     // everyone else at the table.
     const survivors = this.ctx.getWebSockets(`p:${att.pid}`).filter((s) => s !== ws);
-    if (survivors.length === 0 && (await this.#load())) this.#broadcast();
+    if (survivors.length === 0 && (await this.#load())) this.#broadcast(ws);
 
     // The runtime auto-replies to close frames at our compatibility date.
     // Calling close anyway is a harmless no-op that protects us if the date
@@ -513,5 +626,6 @@ function publicRoom(room, online) {
       left: p.left,
       online: online.has(p.id),
     })),
+    waiting: room.waiting.map((p) => ({ id: p.id, name: p.name, online: online.has(p.id) })),
   };
 }

@@ -13,6 +13,8 @@ No app, no signup — one person starts a room, everyone else types four letters
 | **The Council** | 5–10 | 25–45 min | Secret Hitler |
 | **Sabotage** | 5–10 | 20–30 min | The Resistance: Avalon |
 | **Spectrum** | 2–16 | 15–20 min | Wavelength |
+| **Texas Hold'em** | 2–9 | 25–45 min | No-limit poker |
+| **Cheat** | 3–10 | 10–20 min | Cheat / BS / I Doubt It |
 
 Each is implemented from the **official rulebook**, not from an aggregator
 summary. `test/rules.test.js` covers the specific rules that implementations
@@ -106,6 +108,37 @@ against a live DO (`test/e2e/protocol.mjs`).
 Things the research turned up that are commonly implemented wrong, and that
 this codebase gets right:
 
+**Texas Hold'em**
+- Side pots are **derived** from each player's `totalCommitted`, never tracked
+  as a running total. A scalar pot cannot answer "which chips was this short
+  stack eligible for", which is the root of most incorrect payouts. The test
+  is conservation: `sum(pots) + sum(refunds) === sum(totalCommitted)`.
+- An **uncalled bet is returned** before any pot is built, so shoving into a
+  shorter stack never wins chips nobody could match.
+- An all-in short of a full raise **does not re-open the betting** to a player
+  who has already acted and is not facing a full raise (TDA 47-A). They may
+  call the extra or fold. This is the most commonly missed rule in poker
+  software.
+- The minimum raise is always the size of the **last full** bet or raise, which
+  a short all-in does not update.
+- **A-2-3-4-5 is the lowest straight**, not an ace-high one — and the steel
+  wheel is the lowest straight flush.
+- Heads-up, the button posts the **small** blind and acts **first** pre-flop,
+  **last** on every street after it.
+- Odd chips in a split pot go to the first seat left of the button.
+- The action clock **checks when it can** and folds only when it must, so a
+  phone that locks never folds a hand that was free to continue.
+
+**Cheat**
+- Playing your last card is **not** winning — you have to survive the challenge
+  window first, and getting caught on it puts the pile in your hand like anyone
+  else. This is why going out is a phase and not a return value.
+- The **wrong** party takes the pile: a caller who is right gives it to the
+  liar, a caller who is wrong takes it themselves.
+- A partly-true claim is a lie. Three claimed, two actually Twos, is a lie.
+- Card ownership is checked server-side, including duplicates, so a doctored
+  client cannot play a card it does not hold or the same card four times.
+
 **The Council** (Secret Hitler)
 - A policy enacted by the deadlock tracker grants **no** power, resets the
   tracker, and **wipes term limits**.
@@ -164,6 +197,28 @@ this codebase gets right:
 - A deadlocked wolf pack kills nobody, and a tied day vote hangs nobody.
 - Wolves win at parity (`>=`), because from there they can always carry the
   vote. Configurable to play-to-the-last-villager instead.
+
+## Dead ends
+
+A dead end is any state a player can reach where no visible control moves them
+forward. These are the ones that existed and how each is closed — every one has
+a test in `test/e2e/journeys.mjs`, because none of them is observable from the
+API alone.
+
+| Journey | What used to happen | Now |
+|---|---|---|
+| The host closes their tab | Nobody could start; the room was stuck until it expired | Presence flips, and anyone may **take over as host** — but only while the host has no live socket |
+| You arrive mid-round | `409 in_progress`, permanently: a room never returns to the lobby phase | Your seat is **held for the next round** and you are dealt in automatically |
+| The room is already full | You typed your name, tapped Join, and got a toast | The join screen says so **before** the name field, and offers to start your own room |
+| One more than the game seats | Join succeeded; Start then failed with "too many players" | Refused at the door, against the **game's** maximum rather than the global one |
+| Someone needs removing | `kick` and `makeHost` existed on the wire with no UI at all | Host taps a player; a sheet offers hand-over or removal |
+| You want to know the rules first | Reachable only from inside a running game | One tap from the home screen once a game is picked |
+
+The presence bug behind the first row is worth calling out: inside
+`webSocketClose`, `ctx.getWebSockets()` still returns the socket being torn
+down, so the departing player counted as online in the very broadcast meant to
+announce they had left — and nothing broadcast again until someone acted. The
+offline indicator therefore never fired for anyone who simply closed their tab.
 
 ## Mobile
 

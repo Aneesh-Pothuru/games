@@ -27,6 +27,7 @@ export const meta = {
     'A crew proposes teams and votes them up or down. On a mission, everyone plays success or fail in secret. Nobody is ever eliminated — the whole game is argument and voting record.',
   minPlayers: 5,
   maxPlayers: 10,
+  familiar: 'The Resistance: Avalon',
   emblem: 'g-sabotage',
   lengthMinutes: '20–30 min',
 };

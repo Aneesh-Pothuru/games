@@ -10,7 +10,7 @@
  *     dismissing a dialog
  */
 
-import { el, icon, buzz, celebrate } from './ui.js';
+import { el, icon, buzz, celebrate, toast } from './ui.js';
 
 const waiting = (text) => el('div', { class: 'banner banner--accent', text });
 const label = (text) => el('div', { class: 'label', text });
@@ -129,6 +129,88 @@ function outcomeBanner(text, tone = '') {
   return el('div', { class: `banner ${tone}` }, [el('b', { text })]);
 }
 
+/**
+ * Your role, in the top bar, hidden until you hold it.
+ *
+ * Printing the role as plain persistent text is a real secrecy bug in a
+ * secrecy game: six people are sitting around one table, and anyone glancing
+ * at your phone reads it. The text is not in the DOM at rest, so a screenshot
+ * or a shoulder-glance gets nothing.
+ */
+function peekChip(label, tone) {
+  const chip = el('button', {
+    class: 'chip chip--peek', style: tone ? `color:${tone}` : '',
+    'aria-label': `Hold to see your role. Currently hidden.`,
+  }, [el('span', { class: 'chip__masked', text: 'Your role' })]);
+
+  const show = () => {
+    chip.firstChild.textContent = label;
+    chip.classList.add('is-peeking');
+    buzz('reveal');
+  };
+  const hide = () => {
+    chip.firstChild.textContent = 'Your role';
+    chip.classList.remove('is-peeking');
+  };
+  chip.addEventListener('pointerdown', show);
+  for (const e of ['pointerup', 'pointercancel', 'pointerleave']) chip.addEventListener(e, hide);
+  // Hold is not an accessible sole path; space/enter toggles instead.
+  chip.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      chip.classList.contains('is-peeking') ? hide() : show();
+    }
+  });
+  // Never leave a secret on screen when the phone is put down or backgrounded.
+  document.addEventListener('visibilitychange', hide);
+  return chip;
+}
+
+// ------------------------------------------------------------------- cards --
+
+/**
+ * Card rendering.
+ *
+ * The server sends cards as ints 0..51; these four lines are the only thing the
+ * client needs to know about that encoding, and they are deliberately a copy of
+ * the server's rather than a shared module — `public/` is static assets and
+ * `src/` is the Worker, and wiring a build step to share twelve characters
+ * would cost more than it saves.
+ */
+const CARD_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+const CARD_SUITS = [
+  { glyph: '♣', name: 'clubs', red: false },
+  { glyph: '♦', name: 'diamonds', red: true },
+  { glyph: '♥', name: 'hearts', red: true },
+  { glyph: '♠', name: 'spades', red: false },
+];
+
+/** Chips read as money or they read as noise. Always grouped. */
+const chips = (n) => Number(n ?? 0).toLocaleString('en-US');
+
+function playingCard(card, opts = {}) {
+  if (card === null || card === undefined) {
+    return el('span', { class: `pcard pcard--${opts.size ?? 'md'} pcard--back`, 'aria-hidden': 'true' });
+  }
+  const rank = CARD_RANKS[card >> 2];
+  const suit = CARD_SUITS[card & 3];
+  return el('span', {
+    class: [
+      'pcard', `pcard--${opts.size ?? 'md'}`,
+      suit.red ? 'pcard--red' : 'pcard--black',
+      opts.dim ? 'is-dim' : '', opts.best ? 'is-best' : '',
+    ].join(' '),
+    role: 'img',
+    'aria-label': `${rank} of ${suit.name}`,
+  }, [
+    el('span', { class: 'pcard__rank', text: rank }),
+    el('span', { class: 'pcard__suit', text: suit.glyph }),
+  ]);
+}
+
+/** An empty slot, so the board is always five wide and never reflows. */
+const cardSlot = () => el('span', { class: 'pcard pcard--md pcard--slot', 'aria-hidden': 'true' });
+
 // ------------------------------------------------------------------ council --
 
 const COUNCIL_ROLE = {
@@ -142,8 +224,7 @@ const POWER_NAME = { AUDIT: 'Audit', SESSION: 'Emergency Session', FORESIGHT: 'F
 const council = {
   roleChip: (ctx) => {
     const info = COUNCIL_ROLE[ctx.view?.myRole];
-    if (!info) return null;
-    return el('span', { class: 'chip', style: `color:${info.tone}`, title: 'Your role' }, [info.name]);
+    return info ? peekChip(info.name, info.tone) : null;
   },
 
   body(ctx) {
@@ -454,8 +535,8 @@ function toggleRow(text, value, onChange) {
 const oddoneout = {
   roleChip: (ctx) =>
     ctx.view?.amSpy
-      ? el('span', { class: 'chip', style: 'color:var(--danger)' }, ['Spy'])
-      : el('span', { class: 'chip' }, [ctx.view?.myRole ?? '']),
+      ? peekChip('Spy', 'var(--danger)')
+      : ctx.view?.myRole ? peekChip(ctx.view.myRole, null) : null,
 
   body(ctx) {
     const v = ctx.view;
@@ -662,10 +743,7 @@ function oddResult(ctx, v) {
 const sabotage = {
   roleChip: (ctx) =>
     ctx.view?.myRoleInfo
-      ? el('span', {
-          class: 'chip',
-          style: `color:${ctx.view.myTeam === 'CREW' ? 'var(--team-1)' : 'var(--team-2)'}`,
-        }, [ctx.view.myRoleInfo.name])
+      ? peekChip(ctx.view.myRoleInfo.name, ctx.view.myTeam === 'CREW' ? 'var(--team-1)' : 'var(--team-2)')
       : null,
 
   body(ctx) {
@@ -1302,4 +1380,472 @@ function nightBottom(ctx, v, pick) {
   }
 }
 
-export const GAME_UI = { council, oddoneout, sabotage, spectrum, nightfall };
+// ------------------------------------------------------------------ holdem --
+
+/**
+ * Raise sizing has to live outside the render tree.
+ *
+ * Every server broadcast re-renders the screen. If the slider position lived in
+ * the DOM, a player reconnecting elsewhere at the table would reset your bet
+ * mid-drag. Keyed on the betting situation so it resets exactly when the
+ * decision changes and never otherwise.
+ */
+let raiseUi = { key: null, open: false, to: 0 };
+
+function raiseKeyFor(v) {
+  return `${v.handNo}:${v.street}:${v.currentBet}:${v.legal?.maxRaiseTo ?? 0}`;
+}
+
+function syncRaiseUi(v) {
+  const key = raiseKeyFor(v);
+  if (raiseUi.key === key) return;
+  raiseUi = { key, open: false, to: v.legal?.minRaiseTo ?? 0 };
+}
+
+const STREET_NAME = { preflop: 'Pre-flop', flop: 'Flop', turn: 'Turn', river: 'River' };
+
+function potStrip(v) {
+  return el('div', { class: 'pokerpot' }, [
+    el('span', { class: 'label', text: `${STREET_NAME[v.street] ?? ''} · Hand ${v.handNo}` }),
+    el('b', { class: 'pokerpot__amt', text: `${chips(v.potTotal)}` }),
+    el('span', { class: 'label', text: `Blinds ${chips(v.blinds.sb)}/${chips(v.blinds.bb)}` }),
+  ]);
+}
+
+function boardRow(ctx, v) {
+  // Highlighting only ever uses YOUR winning five — the server sends other
+  // players' best hands at showdown, and drawing theirs on the board would be
+  // unreadable rather than informative.
+  const best = new Set(v.seats.find((s) => s.id === ctx.me)?.best ?? []);
+  const cards = [];
+  for (let i = 0; i < 5; i++) {
+    cards.push(v.board[i] === undefined ? cardSlot() : playingCard(v.board[i], { best: best.has(v.board[i]) }));
+  }
+  return el('div', { class: 'pokerboard' }, cards);
+}
+
+/** Your own two cards, always the largest thing on the screen. */
+function myCards(ctx, v) {
+  const me = v.seats.find((s) => s.id === ctx.me);
+  if (!me || !me.hole?.length) {
+    return el('div', { class: 'card center stack stack--tight' }, [
+      label(me ? 'Sitting out this hand' : 'Watching'),
+      me?.place ? el('b', { text: `You finished ${ordinal(me.place)}` }) : null,
+    ]);
+  }
+  const best = new Set(me.best ?? []);
+  return el('div', { class: `pokerhand ${me.folded ? 'is-folded' : ''}` }, [
+    el('div', { class: 'pokerhand__cards' }, me.hole.map((c) => playingCard(c, { size: 'lg', best: best.has(c), dim: me.folded }))),
+    el('div', { class: 'pokerhand__meta' }, [
+      el('b', { class: 'pokerhand__name', text: me.folded ? 'Folded' : (v.myHand ?? 'Waiting for the flop') }),
+      el('span', { class: 'label', text: `Your stack ${chips(me.stack)}` }),
+    ]),
+  ]);
+}
+
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'][(n % 100 > 10 && n % 100 < 14) || n % 10 > 3 ? 0 : n % 10];
+  return `${n}${s}`;
+}
+
+function actionLabel(seat) {
+  const a = seat.lastAction;
+  if (!a) return null;
+  if (a.kind === 'fold') return 'Fold';
+  if (a.kind === 'check') return 'Check';
+  if (a.kind === 'sb') return `SB ${chips(a.amount)}`;
+  if (a.kind === 'bb') return `BB ${chips(a.amount)}`;
+  if (a.kind === 'allIn') return `All in ${chips(a.amount)}`;
+  return `${a.kind === 'call' ? 'Call' : a.kind === 'bet' ? 'Bet' : 'Raise'} ${chips(a.amount)}`;
+}
+
+function seatRows(ctx, v) {
+  return el('ul', { class: 'plist' }, v.seats.map((s) => {
+    const player = ctx.room.players.find((p) => p.id === s.id) ?? { id: s.id, name: 'Player', online: true };
+    const badges = [];
+    if (s.isButton) badges.push(el('span', { class: 'bdg bdg--btn', title: 'Dealer button' }, ['D']));
+    if (s.hole && s.id !== ctx.me) {
+      badges.push(el('span', { class: 'pokerpeek' }, s.hole.map((c) => playingCard(c, { size: 'xs' }))));
+    }
+    const bits = [`${chips(s.stack)}`];
+    if (s.committed > 0) bits.push(actionLabel(s) ?? `In ${chips(s.committed)}`);
+    else if (s.lastAction) bits.push(actionLabel(s));
+    if (s.handName) bits.push(s.handName);
+    if (s.won > 0) bits.push(`won ${chips(s.won)}`);
+
+    return ctx.playerTile(ctx, player, {
+      sub: bits.join(' · '),
+      state: s.place ? 'OUT' : s.folded && s.inHand ? 'FOLDED' : s.allIn ? 'ALL IN' : s.acting ? 'TO ACT' : undefined,
+      badges,
+    });
+  }));
+}
+
+function handoverBanner(ctx, v) {
+  const r = v.result;
+  if (!r) return null;
+  const winners = Object.entries(r.won).filter(([, amount]) => amount > 0);
+  if (!winners.length) return null;
+  const text = winners
+    .map(([id, amount]) => `${ctx.nameOf(ctx, id)} wins ${chips(amount)}`)
+    .join(' · ');
+  const mine = r.won[ctx.me] > 0;
+  if (mine) celebrate();
+  return outcomeBanner(text, mine ? 'banner--good' : '');
+}
+
+/** Presets are how people actually bet. A raw slider alone is unusable. */
+function raisePresets(v, onPick) {
+  const legal = v.legal;
+  const options = [
+    ['Min', legal.minRaiseTo],
+    ['½ pot', Math.round(v.potTotal / 2) + v.currentBet],
+    ['Pot', v.potTotal + v.currentBet],
+    ['All in', legal.maxRaiseTo],
+  ];
+  const seen = new Set();
+  return el('div', { class: 'seg seg--wrap' }, options.map(([name, raw]) => {
+    const to = Math.max(legal.minRaiseTo, Math.min(legal.maxRaiseTo, raw));
+    // Short stacks collapse every preset onto the same number; show it once.
+    if (seen.has(to) && name !== 'All in') return null;
+    seen.add(to);
+    return el('button', {
+      'aria-pressed': String(raiseUi.to === to),
+      onclick: () => onPick(to),
+    }, [name]);
+  }).filter(Boolean));
+}
+
+function raisePanel(ctx, v) {
+  const legal = v.legal;
+  const readout = el('b', { class: 'raise__amt', text: chips(raiseUi.to) });
+  const slider = el('input', {
+    class: 'raise__slider', type: 'range', min: String(legal.minRaiseTo), max: String(legal.maxRaiseTo),
+    step: String(Math.max(1, v.blinds.sb)), value: String(raiseUi.to),
+    'aria-label': 'Raise to',
+  });
+  // Updated in place rather than through render(), so the drag is never
+  // interrupted by an unrelated broadcast.
+  slider.addEventListener('input', () => {
+    raiseUi.to = Number(slider.value);
+    readout.textContent = chips(raiseUi.to);
+    for (const b of panel.querySelectorAll('.seg button')) b.setAttribute('aria-pressed', 'false');
+  });
+
+  const setTo = (to) => {
+    raiseUi.to = to;
+    slider.value = String(to);
+    readout.textContent = chips(to);
+    for (const b of panel.querySelectorAll('.seg button')) {
+      b.setAttribute('aria-pressed', String(b.textContent === 'All in' && to === legal.maxRaiseTo));
+    }
+    buzz('confirm');
+  };
+
+  const panel = el('div', { class: 'raise' }, [
+    el('div', { class: 'raise__head' }, [
+      el('span', { class: 'label', text: legal.raiseIsBet ? 'Bet' : 'Raise to' }),
+      readout,
+    ]),
+    slider,
+    raisePresets(v, setTo),
+    el('div', { class: 'row row--split' }, [
+      el('button', {
+        class: 'btn btn--ghost grow',
+        onclick: () => { raiseUi.open = false; ctx.rerender(); },
+      }, ['Back']),
+      el('button', {
+        class: 'btn btn--primary grow',
+        onclick: () => {
+          raiseUi.open = false;
+          ctx.send({ type: 'act', move: 'raise', to: raiseUi.to });
+        },
+      }, [`${legal.raiseIsBet ? 'Bet' : 'Raise to'} ${chips(raiseUi.to)}`]),
+    ]),
+  ]);
+  return panel;
+}
+
+const holdem = {
+  roleChip: (ctx) => {
+    const v = ctx.view;
+    const me = v?.seats.find((s) => s.id === ctx.me);
+    if (!me) return null;
+    // Stacks are public information at a poker table, so this one is plain.
+    return el('span', { class: 'chip', style: 'color:var(--game-accent)' }, [chips(me.stack)]);
+  },
+
+  body(ctx) {
+    const v = ctx.view;
+    if (!v) return [waiting('Shuffling…')];
+
+    if (v.phase === 'over') {
+      const iWon = v.over.winner === ctx.me;
+      if (iWon) celebrate();
+      return [
+        outcomeBanner(`${ctx.nameOf(ctx, v.over.winner)} wins the tournament`, iWon ? 'banner--good' : ''),
+        label('Finishing order'),
+        el('ul', { class: 'plist' }, v.over.standings.map((s) => {
+          const player = ctx.room.players.find((p) => p.id === s.id) ?? { id: s.id, name: 'Player', online: true };
+          return ctx.playerTile(ctx, player, { sub: ordinal(s.place), state: s.place === 1 ? 'WON' : undefined });
+        })),
+      ];
+    }
+
+    return [
+      potStrip(v),
+      boardRow(ctx, v),
+      v.phase === 'handover' && handoverBanner(ctx, v),
+      myCards(ctx, v),
+      v.myTurn && el('div', { class: 'banner banner--accent', text: 'Your turn.' }),
+      seatRows(ctx, v),
+    ].filter(Boolean);
+  },
+
+  bottom(ctx) {
+    const v = ctx.view;
+    if (!v) return bottom([]);
+
+    if (v.phase === 'over') return playAgainBar(ctx);
+    if (v.phase === 'handover') {
+      return bottom([primary('Deal the next hand', { onclick: () => ctx.send({ type: 'deal' }) })]);
+    }
+
+    const me = v.seats.find((s) => s.id === ctx.me);
+    if (!me || !me.inHand) return waitingBar(me?.place ? `Out in ${ordinal(me.place)}` : 'Watching this hand');
+    if (!v.myTurn) {
+      if (me.folded) return waitingBar('You folded — sit tight');
+      if (me.allIn) return waitingBar('All in — nothing more to do');
+      return waitingBar(v.actor ? `Waiting for ${ctx.nameOf(ctx, v.actor)}` : 'Dealing…');
+    }
+
+    syncRaiseUi(v);
+    const legal = v.legal;
+    if (raiseUi.open && legal.raise) return bottom([raisePanel(ctx, v)]);
+
+    // Fold sits away from the two safe actions and is never the widest target,
+    // because the one misfire nobody forgives is folding the winning hand.
+    return bottom([
+      el('div', { class: 'pokeract' }, [
+        el('button', {
+          class: 'btn btn--danger',
+          onclick: () => ctx.send({ type: 'act', move: 'fold' }),
+        }, ['Fold']),
+        legal.check
+          ? el('button', {
+              class: 'btn btn--primary grow',
+              onclick: () => ctx.send({ type: 'act', move: 'check' }),
+            }, ['Check'])
+          : el('button', {
+              class: 'btn btn--primary grow',
+              onclick: () => ctx.send({ type: 'act', move: 'call' }),
+            }, [legal.callIsAllIn ? `Call all in ${chips(legal.callAmount)}` : `Call ${chips(legal.callAmount)}`]),
+        legal.raise && el('button', {
+          class: 'btn btn--secondary grow',
+          onclick: () => { raiseUi.open = true; ctx.rerender(); },
+        }, [legal.raiseIsBet ? 'Bet' : 'Raise']),
+      ].filter(Boolean)),
+    ]);
+  },
+
+  options: (ctx, set) => [
+    el('div', { class: 'optionrow' }, [
+      el('span', { text: 'Stacks' }),
+      el('div', { class: 'seg' }, [[1000, 'Short'], [2000, 'Normal'], [5000, 'Deep']].map(([val, l]) =>
+        el('button', {
+          'aria-pressed': String(ctx.room.config.startingStack === val),
+          onclick: () => set({ startingStack: val }),
+        }, [l]))),
+    ]),
+    el('div', { class: 'optionrow' }, [
+      el('span', { text: 'Blinds up' }),
+      el('div', { class: 'seg' }, [[3, 'Fast'], [6, 'Normal'], [12, 'Slow'], [0, 'Never']].map(([val, l]) =>
+        el('button', {
+          'aria-pressed': String(ctx.room.config.blindMinutes === val),
+          onclick: () => set({ blindMinutes: val }),
+        }, [l]))),
+    ]),
+    el('div', { class: 'optionrow' }, [
+      el('span', { text: 'Clock' }),
+      el('div', { class: 'seg' }, [[20, '20s'], [45, '45s'], [90, '90s']].map(([val, l]) =>
+        el('button', {
+          'aria-pressed': String(ctx.room.config.actionSeconds === val),
+          onclick: () => set({ actionSeconds: val }),
+        }, [l]))),
+    ]),
+  ],
+};
+
+// ------------------------------------------------------------------- cheat --
+
+/**
+ * Which cards are selected has to outlive a re-render for the same reason the
+ * bet sizer does: someone else joining or reconnecting redraws the screen, and
+ * losing a half-built play mid-turn is maddening.
+ */
+let cheatPick = { key: null, cards: [] };
+
+function syncCheatPick(v) {
+  const key = `${v.rank}:${v.turn}:${v.phase}`;
+  if (cheatPick.key !== key) cheatPick = { key, cards: [] };
+}
+
+/** Your hand: a wrapping grid, because ten cards on a phone will not fit a row. */
+function cheatHand(ctx, v) {
+  const selectable = v.myTurn;
+  return el('div', { class: 'cheathand', role: selectable ? 'group' : null, 'aria-label': 'Your cards' },
+    (v.hand ?? []).map((card) => {
+      const picked = cheatPick.cards.includes(card);
+      const node = el('button', {
+        class: `cheatcard ${picked ? 'is-picked' : ''}`,
+        disabled: !selectable,
+        'aria-pressed': String(picked),
+        onclick: () => {
+          if (picked) cheatPick.cards = cheatPick.cards.filter((c) => c !== card);
+          // Four is the cap, and silently ignoring a fifth tap reads as broken.
+          else if (cheatPick.cards.length >= 4) return toast('Four cards is the most you can put down');
+          else cheatPick.cards = [...cheatPick.cards, card];
+          buzz('confirm');
+          ctx.rerender();
+        },
+      }, [playingCard(card, { size: 'md' })]);
+      return node;
+    }),
+  );
+}
+
+function cheatPile(ctx, v) {
+  const stack = Math.min(4, v.pileCount);
+  return el('div', { class: 'cheatpile' }, [
+    el('div', { class: 'cheatpile__stack' },
+      stack ? Array.from({ length: stack }, () => playingCard(null, { size: 'md' })) : [cardSlot()]),
+    el('div', { class: 'stack stack--tight' }, [
+      el('b', { class: 'cheatpile__n', text: String(v.pileCount) }),
+      el('span', { class: 'label', text: v.pileCount === 1 ? 'card face down' : 'cards face down' }),
+    ]),
+  ]);
+}
+
+const cheat = {
+  roleChip: (ctx) => {
+    const n = ctx.view?.counts?.[ctx.me];
+    if (n === undefined) return null;
+    return el('span', { class: 'chip', style: 'color:var(--game-accent)' }, [`${n} left`]);
+  },
+
+  body(ctx) {
+    const v = ctx.view;
+    if (!v) return [waiting('Dealing…')];
+
+    if (v.phase === 'over') {
+      const won = v.over.winner === ctx.me;
+      if (won) celebrate();
+      return [
+        outcomeBanner(`${ctx.nameOf(ctx, v.over.winner)} got rid of every card`, won ? 'banner--good' : ''),
+        label('Left holding'),
+        el('ul', { class: 'plist' }, v.over.standings.map((s) => {
+          const p = ctx.room.players.find((x) => x.id === s.id) ?? { id: s.id, name: 'Player', online: true };
+          return ctx.playerTile(ctx, p, {
+            sub: s.cards === 0 ? 'Nothing' : `${s.cards} card${s.cards === 1 ? '' : 's'}`,
+            state: s.place === 1 ? 'WON' : undefined,
+          });
+        })),
+      ];
+    }
+
+    const claim = v.lastPlay && el('div', { class: 'card center stack stack--tight' }, [
+      label(`${ctx.nameOf(ctx, v.lastPlay.by)} says`),
+      el('b', { class: 'secret__value', text: `${v.lastPlay.count} × ${v.lastPlay.rankName}` }),
+      v.lastPlay.cards
+        ? el('div', { class: 'row', style: 'justify-content:center;gap:var(--sp-2)' },
+            v.lastPlay.cards.map((c) => playingCard(c, { size: 'md' })))
+        : el('div', { class: 'row', style: 'justify-content:center;gap:var(--sp-2)' },
+            Array.from({ length: v.lastPlay.count }, () => playingCard(null, { size: 'md' }))),
+    ]);
+
+    const verdict = v.reveal && outcomeBanner(
+      v.reveal.lying
+        ? `${ctx.nameOf(ctx, v.lastPlay.by)} was lying — ${ctx.nameOf(ctx, v.reveal.loser)} takes ${v.reveal.pileSize + v.lastPlay.count}`
+        : `It was true — ${ctx.nameOf(ctx, v.reveal.caller)} takes ${v.reveal.pileSize + v.lastPlay.count}`,
+      v.reveal.loser === ctx.me ? 'banner--danger' : 'banner--good',
+    );
+
+    return [
+      el('div', { class: 'row' }, [
+        el('span', { class: 'label grow', text: `Next up: ${v.rankName}` }),
+        el('span', { class: 'label', text: `${v.pileCount} in the pile` }),
+      ]),
+      cheatPile(ctx, v),
+      verdict,
+      claim,
+      v.phase === 'play' && (v.myTurn
+        ? el('div', { class: 'banner banner--accent', text: `Put down anything and call it ${v.rankName}.` })
+        : waiting(`${ctx.nameOf(ctx, v.turn)} is choosing.`)),
+      v.phase === 'challenge' && !v.canChallenge && v.lastPlay.by !== ctx.me
+        && el('div', { class: 'banner', text: 'You let it go.' }),
+      v.goingOut && el('div', { class: 'banner banner--danger', text:
+        `${ctx.nameOf(ctx, v.goingOut)} is out of cards. Call it now or they win.` }),
+      label('Your hand'),
+      cheatHand(ctx, v),
+      el('ul', { class: 'plist' }, v.order.map((id) => {
+        const p = ctx.room.players.find((x) => x.id === id) ?? { id, name: 'Player', online: true };
+        return ctx.playerTile(ctx, p, {
+          sub: `${v.counts[id]} card${v.counts[id] === 1 ? '' : 's'}`,
+          state: id === v.turn && v.phase === 'play' ? 'turn' : undefined,
+        });
+      })),
+    ].filter(Boolean);
+  },
+
+  bottom(ctx) {
+    const v = ctx.view;
+    if (!v) return bottom([]);
+    if (v.phase === 'over') return playAgainBar(ctx);
+    if (v.phase === 'reveal') return waitingBar('Next player up…');
+
+    if (v.phase === 'challenge') {
+      if (v.lastPlay.by === ctx.me) return waitingBar('See if anyone calls it');
+      if (!v.canChallenge) return waitingBar('Waiting for the others');
+      return bottom([
+        el('div', { class: 'row row--split' }, [
+          el('button', {
+            class: 'btn btn--danger grow',
+            onclick: () => ctx.send({ type: 'challenge' }),
+          }, [`Cheat!`]),
+          el('button', {
+            class: 'btn btn--secondary grow',
+            onclick: () => ctx.send({ type: 'pass' }),
+          }, ['Let it go']),
+        ]),
+      ]);
+    }
+
+    if (!v.myTurn) return waitingBar(`Waiting for ${ctx.nameOf(ctx, v.turn)}`);
+
+    syncCheatPick(v);
+    const n = cheatPick.cards.length;
+    return bottom([
+      primary(n ? `Play ${n} as ${v.rankName}` : `Pick cards to call ${v.rankName}`, {
+        disabled: n === 0,
+        onclick: () => {
+          const cards = cheatPick.cards;
+          cheatPick = { key: null, cards: [] };
+          ctx.send({ type: 'play', cards });
+        },
+      }),
+    ]);
+  },
+
+  options: (ctx, set) => [
+    el('div', { class: 'optionrow' }, [
+      el('span', { text: 'Time to call' }),
+      el('div', { class: 'seg' }, [[8, 'Snappy'], [15, 'Normal'], [30, 'Relaxed']].map(([val, l]) =>
+        el('button', {
+          'aria-pressed': String(ctx.room.config.challengeSeconds === val),
+          onclick: () => set({ challengeSeconds: val }),
+        }, [l]))),
+    ]),
+  ],
+};
+
+export const GAME_UI = { council, oddoneout, sabotage, spectrum, nightfall, holdem, cheat };

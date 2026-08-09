@@ -29,6 +29,7 @@ export const meta = {
     'Wolves pick someone off each night; by day the village argues and hangs someone. No moderator, no closed eyes, nobody sitting out — everyone plays.',
   minPlayers: 5,
   maxPlayers: 16,
+  familiar: 'Werewolf / Mafia',
   emblem: 'g-nightfall',
   lengthMinutes: '10–20 min',
 };

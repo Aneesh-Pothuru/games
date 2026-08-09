@@ -24,8 +24,8 @@ await host.goto('http://localhost:8787/');
 await host.waitForSelector('.gametile');
 check('Nightfall is listed', await host.locator('.gametile', {hasText:'Nightfall'}).count() === 1);
 
-await host.fill('#name','Ana');
 await host.locator('.gametile', {hasText:'Nightfall'}).click();
+await host.fill('#startbar-name','Ana');
 await host.locator('.bar--bottom .btn--primary').click();
 await host.waitForSelector('.roomcode');
 const code = (await host.locator('.roomcode__cells').innerText()).replace(/\s/g,'');

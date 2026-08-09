@@ -38,6 +38,8 @@ const state = {
   // inputs, and anything typed but unsaved would otherwise be silently lost.
   name: recalledName(),
   codeEntry: '',
+  // What /api/room told us about a room we have not joined yet.
+  peek: null,
 };
 
 // --------------------------------------------------------------------- boot --
@@ -61,6 +63,7 @@ async function boot() {
     const seat = loadSeat(path);
     if (seat) return join(path, seat);
     state.screen = 'join';
+    loadPeek(path);
   }
   render();
 }
@@ -134,6 +137,11 @@ function handleEvent(msg) {
     nominated: (m) => `${m.name} was nominated`,
     proposed: (m) => 'A team was proposed',
     assassinated: (m) => `The Handler names ${m.name}`,
+    claim: (m) => `${m.name}: ${m.count} × ${m.rank}`,
+    called: (m) => (m.lying
+      ? `${m.caller} calls it — ${m.accused} was lying`
+      : `${m.caller} calls it — and ${m.accused} was telling the truth`),
+    cheatWin: (m) => `${m.name} is out of cards`,
   }[msg.kind];
   if (label) toast(label(msg));
 }
@@ -152,6 +160,8 @@ const ERRORS = {
   veto_refused: 'The Speaker already refused',
   room_full: 'That room is full',
   in_progress: 'That game has already started',
+  waiting_for_next_round: 'You are in for the next round',
+  host_is_here: 'The host is still connected',
   not_found: 'No room with that code',
   name_required: 'Enter a name first',
   bad_code: 'That code does not look right',
@@ -174,10 +184,10 @@ function render() {
   document.documentElement.dataset.game = state.room?.gameId ?? '';
 }
 
-function shell({ top, body, bottom }) {
-  return el('div', { class: 'screen' }, [
+function shell({ top, body, bottom, variant = '' }) {
+  return el('div', { class: `screen ${variant}` }, [
     top ?? el('div'),
-    el('main', { class: 'flow' }, [el('div', { class: 'shell stack' }, body)]),
+    el('main', { class: 'flow' }, [el('div', { class: `shell stack ${variant}` }, body)]),
     bottom ?? el('div'),
   ]);
 }
@@ -185,40 +195,25 @@ function shell({ top, body, bottom }) {
 // --------------------------------------------------------------------- home --
 
 function homeScreen() {
-  const nameInput = el('input', {
-    class: 'input', id: 'name', maxlength: '14', autocomplete: 'nickname',
-    placeholder: 'Your name (so people know it’s you)', value: state.name,
-    oninput: (e) => { state.name = e.target.value; },
-  });
+  // The code box only accepts the room alphabet, which silently eats anything
+  // else. Someone typing "spyfall" here watched it become "SPYF" and then got
+  // told the room didn't exist -- so match game names too and offer a rescue.
+  const rescue = matchGameByName(state.codeEntry);
+
   const codeInput = el('input', {
-    class: 'input input--code', id: 'code', maxlength: '4', inputmode: 'text',
+    class: 'input input--code', id: 'code', maxlength: '16', inputmode: 'text',
     enterkeyhint: 'go', autocomplete: 'off', autocapitalize: 'characters',
-    autocorrect: 'off', spellcheck: 'false', placeholder: '••••', value: state.codeEntry,
+    autocorrect: 'off', spellcheck: 'false', placeholder: 'ROOM CODE',
+    'aria-label': 'Room code', value: state.codeEntry,
     oninput: (e) => {
-      e.target.value = e.target.value.toUpperCase().replace(/[^BCDFGHJKMNPQRSTVWXYZ]/g, '').slice(0, 4);
-      state.codeEntry = e.target.value;
+      state.codeEntry = e.target.value.toUpperCase().slice(0, 16);
+      e.target.value = state.codeEntry;
+      renderRescue();
     },
     onkeydown: (e) => { if (e.key === 'Enter') doJoin(state.codeEntry, state.name); },
   });
 
-  const tiles = state.games.map((g) =>
-    el('button', {
-      class: `gametile ${state.picked === g.id ? 'is-selected' : ''}`,
-      dataset: { game: g.id },
-      'aria-pressed': String(state.picked === g.id),
-      onclick: () => {
-        state.picked = state.picked === g.id ? null : g.id;
-        render();
-      },
-    }, [
-      icon(g.emblem, 'gametile__emblem'),
-      el('span', { class: 'grow' }, [
-        el('span', { class: 'gametile__name', text: g.name }),
-        el('span', { class: 'gametile__meta', text: `${g.minPlayers}–${g.maxPlayers} players · ${g.lengthMinutes}` }),
-        el('span', { class: 'dim t-sm', style: 'display:block;margin-top:4px', text: g.tagline }),
-      ]),
-    ]),
-  );
+  const tiles = state.games.map((g) => gameTile(g));
 
   return shell({
     top: el('header', { class: 'bar bar--top' }, [
@@ -226,29 +221,141 @@ function homeScreen() {
       themeToggle(),
     ]),
     body: [
-      el('h1', { class: 't-2xl', text: 'Party games for a room full of phones' }),
-      el('p', { class: 'dim t-sm', text: 'No app, no signup. One person starts a room, everyone else types the code.' }),
-      el('div', { class: 'field' }, [el('label', { class: 'label', for: 'name', text: 'Your name' }), nameInput]),
-      el('div', { class: 'field' }, [
-        el('label', { class: 'label', for: 'code', text: 'Joining a room?' }),
+      el('h1', { class: 't-lg', text: 'Party games for a room full of phones' }),
+
+      // Answers "where is Secret Hitler?" without scrolling, and makes the
+      // browser's find-in-page work. Kept to two lines so the games clear the
+      // fold on a 375x667 phone.
+      el('p', { class: 'banner banner--accent t-xs', text:
+        'Spyfall · Wavelength · Cheat · Werewolf · Poker · Secret Hitler · Avalon — all seven are below.' }),
+
+      // Joining is one compact row, not a titled section: most joiners arrive
+      // on a link and never see this screen at all.
+      el('div', { class: 'joinrow' }, [
         codeInput,
-        el('button', {
-          class: 'btn btn--secondary btn--block',
-          onclick: () => doJoin(state.codeEntry, state.name),
-        }, ['Join room']),
+        el('button', { class: 'btn btn--secondary', onclick: () => doJoin(state.codeEntry, state.name) }, ['Join']),
       ]),
-      el('div', { class: 'label', text: 'Or start a new one' }),
-      el('div', { class: 'gamegrid' }, tiles),
-      state.error && el('div', { class: 'banner banner--danger', text: state.error }),
+      el('div', { id: 'rescue' }, rescue ? [rescueCard(rescue)] : []),
+
+      el('div', { class: 'label', text: 'Pick a game' }),
+      el('div', { class: 'gamegrid', role: 'radiogroup', 'aria-label': 'Pick a game' }, tiles),
+
+      attributionFooter(),
     ],
-    bottom: el('footer', { class: 'bar bar--bottom' }, [
-      el('button', {
-        class: 'btn btn--primary btn--block',
-        disabled: !state.picked || state.busy,
-        onclick: () => doCreate(state.name),
-      }, [state.picked ? `Start ${state.games.find((g) => g.id === state.picked).name}` : 'Pick a game']),
-    ]),
+    // No bar until a game is chosen: a permanently disabled button would steal
+    // ~84px from the screen that most needs the room.
+    bottom: state.picked ? startBar() : null,
+    variant: 'home',
   });
+}
+
+/** Re-render only the rescue slot so typing does not rebuild the whole page. */
+function renderRescue() {
+  const slot = document.getElementById('rescue');
+  if (!slot) return;
+  const match = matchGameByName(state.codeEntry);
+  clear(slot);
+  if (match) slot.append(rescueCard(match));
+}
+
+const ALIASES = {
+  spyfall: 'oddoneout', spy: 'oddoneout',
+  werewolf: 'nightfall', mafia: 'nightfall', wolf: 'nightfall',
+  'secret hitler': 'council', secrethitler: 'council', hitler: 'council',
+  avalon: 'sabotage', resistance: 'sabotage',
+  wavelength: 'spectrum',
+  poker: 'holdem', holdem: 'holdem', 'texas holdem': 'holdem', cards: 'holdem',
+  bs: 'cheat', bullshit: 'cheat', 'i doubt it': 'cheat', liar: 'cheat',
+};
+
+/** Does what they typed look like a game rather than a room code? */
+function matchGameByName(raw) {
+  const q = String(raw ?? '').toLowerCase().replace(/[^a-z ]/g, '').trim();
+  if (q.length < 3) return null;
+  const byAlias = ALIASES[q] ?? Object.entries(ALIASES).find(([k]) => k.startsWith(q) || q.startsWith(k))?.[1];
+  const direct = state.games.find(
+    (g) => g.name.toLowerCase().includes(q) || (g.familiar ?? '').toLowerCase().includes(q),
+  );
+  return state.games.find((g) => g.id === byAlias) ?? direct ?? null;
+}
+
+function rescueCard(game) {
+  return el('div', { class: 'card stack stack--tight' }, [
+    el('b', { text: `Looking for ${game.familiar ?? game.name}?` }),
+    el('span', { class: 'dim t-sm', text: `That is ${game.name} here. ${game.minPlayers}–${game.maxPlayers} players, ${game.lengthMinutes}.` }),
+    el('button', {
+      class: 'btn btn--primary btn--block',
+      onclick: () => {
+        state.picked = game.id;
+        state.codeEntry = '';
+        render();
+      },
+    }, [`Pick ${game.name}`]),
+  ]);
+}
+
+function gameTile(g) {
+  const selected = state.picked === g.id;
+  return el('button', {
+    class: `gametile ${selected ? 'is-selected' : ''}`,
+    dataset: { game: g.id },
+    role: 'radio',
+    'aria-checked': String(selected),
+    onclick: () => {
+      state.picked = selected ? null : g.id;
+      render();
+      if (!selected) document.getElementById('startbar-name')?.focus({ preventScroll: true });
+    },
+  }, [
+    icon(g.emblem, 'gametile__emblem'),
+    el('span', { class: 'grow' }, [
+      el('span', { class: 'gametile__name', text: g.name }),
+      // The name people came looking for.
+      g.familiar && el('span', { class: 'gametile__familiar', text: `Plays like ${g.familiar}` }),
+      el('span', { class: 'gametile__meta', text: `${g.minPlayers}–${g.maxPlayers} players · ${g.lengthMinutes}` }),
+      el('span', { class: 'dim t-sm', style: 'display:block;margin-top:4px', text: g.plain ?? g.tagline }),
+    ]),
+  ]);
+}
+
+/** Name and start together, so the field is never off-screen from the button. */
+function startBar() {
+  const game = state.games.find((g) => g.id === state.picked);
+  return el('footer', { class: 'bar bar--bottom' }, [
+    el('input', {
+      class: 'input', id: 'startbar-name', maxlength: '14', autocomplete: 'nickname',
+      enterkeyhint: 'go', placeholder: 'Your name', 'aria-label': 'Your name',
+      value: state.name,
+      oninput: (e) => { state.name = e.target.value; },
+      onkeydown: (e) => { if (e.key === 'Enter') doCreate(state.name); },
+    }),
+    el('button', {
+      class: 'btn btn--primary btn--block',
+      disabled: state.busy,
+      onclick: () => doCreate(state.name),
+    }, [state.busy ? 'Starting…' : `Start ${game.name}`]),
+    // The rules were previously reachable only from inside a running game, so
+    // the host had to commit five friends to a room before they could read
+    // what they had picked.
+    el('button', {
+      class: 'btn btn--ghost btn--block',
+      onclick: () => openRules(game.id),
+    }, [`How to play ${game.name}`]),
+  ]);
+}
+
+function attributionFooter() {
+  return el('details', { class: 'card', style: 'margin-top:var(--sp-5)' }, [
+    el('summary', { class: 'label', text: 'About these games' }),
+    el('div', { class: 'stack stack--tight', style: 'margin-top:var(--sp-3)' }, [
+      el('p', { class: 'dim t-sm', text:
+        'Parlour is not affiliated with, endorsed by, or licensed by the publishers of the games named here. These are our own implementations, in the spirit of games we love.' }),
+      ...state.games.filter((g) => g.familiar).map((g) =>
+        el('p', { class: 'dim t-sm', text: `${g.name} — in the spirit of ${g.familiar}.` })),
+      el('p', { class: 'dim t-sm', text:
+        'Every location, spectrum pair and word list here was written for this site.' }),
+    ]),
+  ]);
 }
 
 function joinScreen() {
@@ -258,21 +365,60 @@ function joinScreen() {
     oninput: (e) => { state.name = e.target.value; },
     onkeydown: (e) => { if (e.key === 'Enter') doJoin(state.code, state.name); },
   });
+  // A code out of context tells you nothing. The peek is one cheap read that
+  // turns "Joining room VDMH" into "Ana's game of Texas Hold'em, 4 already in"
+  // — which is also how you find out you have the wrong room before you type
+  // your name into it.
+  const peek = state.peek;
+  const inProgress = peek?.inProgress;
+  // Finding out a room is full AFTER typing your name and tapping Join is a
+  // waste of the only two things a guest has to give.
+  const full = peek && peek.playerCount + (peek.waitingCount ?? 0) >= peek.maxPlayers;
   return shell({
     top: el('header', { class: 'bar bar--top' }, [el('span', { class: 'label', text: 'Parlour' }), themeToggle()]),
     body: [
-      el('h1', { class: 't-xl', text: `Joining room ${state.code}` }),
-      el('div', { class: 'field' }, [el('label', { class: 'label', for: 'name', text: 'Your name' }), nameInput]),
-      state.error && el('div', { class: 'banner banner--danger', text: state.error }),
-    ],
-    bottom: el('footer', { class: 'bar bar--bottom' }, [
-      el('button', {
-        class: 'btn btn--primary btn--block',
-        disabled: state.busy,
-        onclick: () => doJoin(state.code, state.name),
-      }, ['Go — join game']),
-    ]),
+      el('h1', { class: 't-xl', text: peek ? peek.gameName : `Joining room ${state.code}` }),
+      peek && el('p', { class: 'dim', text:
+        `${peek.hostName ? `${peek.hostName}’s room` : `Room ${state.code}`} · ${peek.playerCount} ${peek.playerCount === 1 ? 'player' : 'players'} in` }),
+      full && el('div', { class: 'banner banner--danger', text:
+        `This room is full — ${peek.gameName} seats ${peek.maxPlayers}.` }),
+      !full && inProgress && el('div', { class: 'banner banner--accent', text:
+        'A round is already running. Join now and you are dealt in as soon as it finishes.' }),
+      !full && el('div', { class: 'field' }, [el('label', { class: 'label', for: 'name', text: 'Your name' }), nameInput]),
+    ].filter(Boolean),
+    bottom: el('footer', { class: 'bar bar--bottom' }, full
+      ? [el('button', {
+          class: 'btn btn--primary btn--block',
+          onclick: () => {
+            history.pushState({}, '', '/');
+            state.screen = 'home';
+            state.code = null;
+            state.peek = null;
+            render();
+          },
+        }, ['Start a room of your own'])]
+      : [el('button', {
+          class: 'btn btn--primary btn--block',
+          disabled: state.busy,
+          onclick: () => doJoin(state.code, state.name),
+        }, [inProgress ? 'Hold me a seat' : 'Go — join game'])]),
   });
+}
+
+/** Fire-and-forget: the join screen renders fine without it. */
+async function loadPeek(code) {
+  state.peek = null;
+  try {
+    const res = await fetch(`/api/room?code=${encodeURIComponent(code)}`);
+    if (!res.ok) return;
+    const info = await res.json();
+    if (state.screen === 'join' && state.code === code) {
+      state.peek = info;
+      render();
+    }
+  } catch {
+    /* the screen already works without it */
+  }
 }
 
 function goneScreen() {
@@ -295,8 +441,12 @@ function goneScreen() {
 
 async function doCreate(name) {
   if (!name.trim()) {
-    state.error = 'Enter a name first';
-    return render();
+    // A toast is fixed near the top and is announced to screen readers. The old
+    // inline banner rendered below five game tiles, so tapping Start with an
+    // empty name looked like the button simply did nothing.
+    toast('Add your name first — the box just above this button.');
+    document.getElementById('startbar-name')?.focus();
+    return;
   }
   state.busy = true;
   unlockAudio();
@@ -308,7 +458,7 @@ async function doCreate(name) {
     history.pushState({}, '', `/${res.code}`);
     await join(res.code, res);
   } catch (err) {
-    state.error = humanError(err.code);
+    toast(humanError(err.code));
   } finally {
     state.busy = false;
     render();
@@ -318,12 +468,20 @@ async function doCreate(name) {
 async function doJoin(code, name) {
   const clean = String(code ?? '').toUpperCase().replace(/[^BCDFGHJKMNPQRSTVWXYZ]/g, '');
   if (clean.length !== 4) {
-    state.error = 'Room codes are 4 letters';
-    return render();
+    const match = matchGameByName(code);
+    toast(match
+      ? `That is a game, not a room code. ${match.name} is in the list below.`
+      : 'Room codes are 4 letters, no vowels.');
+    return;
   }
   if (!name.trim()) {
-    state.error = 'Enter a name first';
-    return render();
+    state.name = '';
+    state.screen = 'join';
+    state.code = clean;
+    loadPeek(clean);
+    render();
+    toast('Add your name to join.');
+    return;
   }
   state.busy = true;
   unlockAudio();
@@ -335,7 +493,15 @@ async function doJoin(code, name) {
     history.pushState({}, '', `/${clean}`);
     await join(clean, res);
   } catch (err) {
-    state.error = humanError(err.code);
+    toast(humanError(err.code));
+    // The room filled up while they were typing. Re-peek so the screen shows
+    // the wall and the way around it, rather than a toast that fades back to a
+    // form that will keep failing.
+    if (err.code === 'room_full') {
+      state.screen = 'join';
+      state.code = clean;
+      loadPeek(clean);
+    }
   } finally {
     state.busy = false;
     render();
@@ -360,16 +526,68 @@ function gameScreen() {
     again: () => state.conn?.send({ t: 'playAgain' }),
     playerTile, playerList, nameOf, avatarFor, select, selected: () => state.selection,
     revealed: state.revealed, setRevealed: (v) => { state.revealed = v; render(); },
+    // For UI that swaps panes without a server round-trip, e.g. opening the
+    // bet sizer. Anything that changes game state must go through send().
+    rerender: render,
   };
 
-  const body = inLobby ? lobbyBody(ctx) : ui.body(ctx);
-  const bottom = inLobby ? lobbyBottom(ctx) : ui.bottom(ctx);
+  // Arrived mid-round: holding a seat for the next one, and deliberately sent
+  // no game view at all, so there is nothing here that could leak.
+  const waiting = !inLobby && !room.players.some((p) => p.id === state.pid);
+  const body = waiting ? waitingBody(ctx) : inLobby ? lobbyBody(ctx) : ui.body(ctx);
+  const bottom = waiting ? waitingBottom(ctx) : inLobby ? lobbyBottom(ctx) : ui.bottom(ctx);
 
   return shell({
-    top: gameTop(ctx, ui),
+    top: gameTop(ctx, waiting ? {} : ui),
     body: [connectionBanner(), ...body],
     bottom,
   });
+}
+
+function waitingBody(ctx) {
+  const { room } = ctx;
+  const game = state.games.find((g) => g.id === room.gameId);
+  const queue = room.waiting ?? [];
+  const mine = queue.findIndex((p) => p.id === state.pid);
+  return [
+    el('div', { class: 'banner banner--accent', text: `A round of ${game?.name ?? 'the game'} is already going.` }),
+    el('div', { class: 'card center stack stack--tight' }, [
+      el('div', { class: 'label', text: 'You are in' }),
+      el('b', { class: 'secret__value', text: mine === 0 ? 'Next round' : `Next round · ${mine + 1} in the queue` }),
+      el('p', { class: 'dim t-sm', text: 'Your seat is held. You will be dealt in automatically when this round finishes — nothing to do but wait.' }),
+    ]),
+    el('div', { class: 'label', text: 'Playing right now' }),
+    playerList(ctx, { showHost: true }),
+    queue.length > 1 && el('div', { class: 'label', text: 'Also waiting' }),
+    queue.length > 1 && el('ul', { class: 'plist' }, queue.filter((p) => p.id !== state.pid).map((p) =>
+      playerTile(ctx, { ...p, online: p.online }, {}))),
+  ].filter(Boolean);
+}
+
+function waitingBottom(ctx) {
+  return el('footer', { class: 'bar bar--bottom' }, [
+    el('button', {
+      class: 'btn btn--primary btn--block',
+      onclick: () => openRules(ctx.room.gameId),
+    }, ['Read the rules while you wait']),
+    el('button', {
+      class: 'btn btn--ghost btn--block',
+      onclick: () => leaveRoom(),
+    }, ['Leave']),
+  ]);
+}
+
+/** Give up the seat, drop the token, and go home — no orphaned reconnects. */
+function leaveRoom() {
+  state.conn?.send({ t: 'leave' });
+  if (state.room?.code) clearSeat(state.room.code);
+  state.conn?.close?.();
+  state.room = null;
+  state.view = null;
+  state.code = null;
+  state.screen = 'home';
+  history.pushState({}, '', '/');
+  render();
 }
 
 function gameTop(ctx, ui) {
@@ -439,6 +657,9 @@ function lobbyBody(ctx) {
   const { room, isHost } = ctx;
   const game = state.games.find((g) => g.id === room.gameId);
   const enough = room.players.length >= (game?.minPlayers ?? 3);
+  const full = room.players.length >= (game?.maxPlayers ?? 99);
+  const host = room.players.find((p) => p.id === room.hostId);
+  const hostGone = host && !host.online;
 
   return [
     el('button', {
@@ -449,12 +670,47 @@ function lobbyBody(ctx) {
       el('span', { class: 'roomcode__cells num', 'aria-hidden': 'true' }, room.code.split('').map((c) => el('i', { text: c }))),
       el('span', { class: 'roomcode__hint label' }, [icon('i-copy', 'ico ico--sm'), 'Tap to copy the link']),
     ]),
-    el('div', { class: 'label', text: `${room.players.length} in the room` }),
-    playerList(ctx, { showHost: true }),
+    // The one room-wide dead end: the host closes their tab and nobody else
+    // can start. Offer the way out where the problem is visible.
+    hostGone && !isHost && el('div', { class: 'stack stack--tight' }, [
+      el('div', { class: 'banner banner--danger', text: `${host.name} has dropped out, so nobody can start.` }),
+      el('button', {
+        class: 'btn btn--secondary btn--block',
+        onclick: () => state.conn?.send({ t: 'claimHost' }),
+      }, ['Take over as host']),
+    ]),
+    el('div', { class: 'label', text: `${room.players.length} in the room${full ? ' — full' : ''}` }),
+    playerList(ctx, {
+      showHost: true,
+      // Host controls live on the tiles rather than behind a settings screen:
+      // "get Dev out of this room" is a thing you want to do while looking at
+      // Dev, not three taps away.
+      onPickFor: (p) => (isHost && p.id !== ctx.me ? () => openPlayerSheet(ctx, p) : undefined),
+      subFor: (p) => (p.id === room.hostId ? 'Host' : p.online ? null : 'Reconnecting'),
+    }),
     !enough && el('div', { class: 'banner', text: `Needs at least ${game?.minPlayers} players.` }),
-    !isHost && el('div', { class: 'banner banner--accent', text: `Waiting for ${nameOf(ctx, room.hostId)} to start.` }),
+    !isHost && !hostGone && el('div', { class: 'banner banner--accent', text: `Waiting for ${nameOf(ctx, room.hostId)} to start.` }),
     isHost && gameOptions(ctx, game),
   ];
+}
+
+/** Host-only actions on one player. A sheet, so a mis-tap is never destructive. */
+function openPlayerSheet(ctx, player) {
+  document.getElementById('sheet-title').textContent = player.name;
+  const body = clear(document.getElementById('sheet-body'));
+  const close = () => sheet.close();
+  body.append(
+    el('button', {
+      class: 'btn btn--secondary btn--block',
+      onclick: () => { state.conn?.send({ t: 'makeHost', playerId: player.id }); close(); },
+    }, [`Make ${player.name} the host`]),
+    el('button', {
+      class: 'btn btn--danger btn--block',
+      onclick: () => { state.conn?.send({ t: 'kick', playerId: player.id }); close(); },
+    }, [`Remove ${player.name} from the room`]),
+    el('button', { class: 'btn btn--ghost btn--block', onclick: close }, ['Cancel']),
+  );
+  sheet.showModal();
 }
 
 function gameOptions(ctx, game) {
@@ -474,21 +730,39 @@ function lobbyBottom(ctx) {
   const enough = count >= (game?.minPlayers ?? 3);
   const tooMany = count > (game?.maxPlayers ?? 99);
 
+  const need = (game?.minPlayers ?? 3) - count;
+
   if (!isHost) {
     return el('footer', { class: 'bar bar--bottom' }, [
-      el('button', { class: 'btn btn--secondary btn--block', onclick: shareLink }, ['Invite someone']),
+      el('button', { class: 'btn btn--primary btn--block', onclick: shareLink }, [
+        need > 0 ? `Invite ${need} more ${need === 1 ? 'person' : 'people'}` : 'Invite someone',
+      ]),
     ]);
   }
+
+  // Short of players? Inviting IS the next step, so it takes the primary slot.
+  // A disabled button with nothing beside it is the dead end that made this
+  // look broken.
+  if (!enough) {
+    return el('footer', { class: 'bar bar--bottom' }, [
+      el('button', { class: 'btn btn--primary btn--block', onclick: shareLink }, [
+        `Invite ${need} more ${need === 1 ? 'person' : 'people'}`,
+      ]),
+      el('button', {
+        class: 'btn btn--secondary btn--block',
+        onclick: () => state.conn?.send({ t: 'start' }),
+        disabled: true,
+      }, [`Start needs ${game.minPlayers} players`]),
+    ]);
+  }
+
   return el('footer', { class: 'bar bar--bottom' }, [
     el('button', {
       class: 'btn btn--primary btn--block',
-      disabled: !enough || tooMany,
-      // The reason lives in the label, so a disabled button never dead-ends.
+      disabled: tooMany,
       onclick: () => state.conn?.send({ t: 'start' }),
     }, [
-      tooMany ? `Too many players (max ${game.maxPlayers})`
-      : enough ? `Start with ${count} player${count === 1 ? '' : 's'}`
-      : `Need ${game.minPlayers} players (${count} here)`,
+      tooMany ? `Too many players (max ${game.maxPlayers})` : `Start with ${count} player${count === 1 ? '' : 's'}`,
     ]),
     el('button', { class: 'btn btn--ghost btn--block', onclick: shareLink }, ['Invite someone']),
   ]);
@@ -516,8 +790,7 @@ function playerTile(ctx, player, opts = {}) {
     badges.push(el('span', { class: 'bdg bdg--off', title: 'Reconnecting' }, [icon('i-wifi-off')]));
   }
 
-  const tag = opts.onPick ? 'button' : 'li';
-  return el(tag, {
+  const tile = el(opts.onPick ? 'button' : 'li', {
     class: `ptile ${opts.pick ? 'ptile--pick' : ''} ${opts.selected ? 'is-selected' : ''} ${player.online ? '' : 'is-offline'}`,
     dataset: opts.state ? { state: opts.state } : {},
     disabled: opts.disabled,
@@ -530,6 +803,10 @@ function playerTile(ctx, player, opts = {}) {
     ]),
     el('span', { class: 'ptile__badges' }, badges),
   ]);
+  // A <ul> whose children are <button>s is not a list to a screen reader, and
+  // "6 items" is real information here. display:contents keeps the flex layout
+  // identical while restoring the semantics.
+  return opts.onPick ? el('li', { class: 'ptile__slot' }, [tile]) : tile;
 }
 
 function playerList(ctx, opts = {}) {
@@ -539,6 +816,9 @@ function playerList(ctx, opts = {}) {
       sub: opts.subFor?.(p),
       state: opts.stateFor?.(p),
       badges: opts.badgesFor?.(p),
+      // Per-player, because "you cannot manage yourself" must make the tile
+      // inert rather than a button that does nothing when tapped.
+      onPick: opts.onPickFor?.(p),
     })),
   );
 }

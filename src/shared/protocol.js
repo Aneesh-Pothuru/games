@@ -21,6 +21,8 @@ export const C = {
   START: 'start',
   KICK: 'kick',
   MAKE_HOST: 'makeHost',
+  // Taken, not given: the host closing their tab must not strand the room.
+  CLAIM_HOST: 'claimHost',
   LEAVE: 'leave',
   PLAY_AGAIN: 'playAgain',
 };

@@ -137,6 +137,11 @@ function handleEvent(msg) {
     nominated: (m) => `${m.name} was nominated`,
     proposed: (m) => 'A team was proposed',
     assassinated: (m) => `The Handler names ${m.name}`,
+    claim: (m) => `${m.name}: ${m.count} × ${m.rank}`,
+    called: (m) => (m.lying
+      ? `${m.caller} calls it — ${m.accused} was lying`
+      : `${m.caller} calls it — and ${m.accused} was telling the truth`),
+    cheatWin: (m) => `${m.name} is out of cards`,
   }[msg.kind];
   if (label) toast(label(msg));
 }
@@ -222,7 +227,7 @@ function homeScreen() {
       // browser's find-in-page work. Kept to two lines so the games clear the
       // fold on a 375x667 phone.
       el('p', { class: 'banner banner--accent t-xs', text:
-        'Spyfall · Wavelength · Werewolf · Poker · Secret Hitler · Avalon — all six are below.' }),
+        'Spyfall · Wavelength · Cheat · Werewolf · Poker · Secret Hitler · Avalon — all seven are below.' }),
 
       // Joining is one compact row, not a titled section: most joiners arrive
       // on a link and never see this screen at all.
@@ -260,6 +265,7 @@ const ALIASES = {
   avalon: 'sabotage', resistance: 'sabotage',
   wavelength: 'spectrum',
   poker: 'holdem', holdem: 'holdem', 'texas holdem': 'holdem', cards: 'holdem',
+  bs: 'cheat', bullshit: 'cheat', 'i doubt it': 'cheat', liar: 'cheat',
 };
 
 /** Does what they typed look like a game rather than a room code? */

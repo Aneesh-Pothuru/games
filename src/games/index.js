@@ -22,8 +22,9 @@ import * as sabotage from './sabotage.js';
 import * as spectrum from './spectrum.js';
 import * as nightfall from './nightfall.js';
 import * as holdem from './poker/index.js';
+import * as cheat from './cheat.js';
 
-const MODULES = [oddoneout, spectrum, nightfall, holdem, council, sabotage];
+const MODULES = [oddoneout, spectrum, cheat, nightfall, holdem, council, sabotage];
 
 export const GAMES = Object.fromEntries(MODULES.map((m) => [m.meta.id, m]));
 

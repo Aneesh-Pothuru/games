@@ -14,6 +14,7 @@ No app, no signup — one person starts a room, everyone else types four letters
 | **Sabotage** | 5–10 | 20–30 min | The Resistance: Avalon |
 | **Spectrum** | 2–16 | 15–20 min | Wavelength |
 | **Texas Hold'em** | 2–9 | 25–45 min | No-limit poker |
+| **Cheat** | 3–10 | 10–20 min | Cheat / BS / I Doubt It |
 
 Each is implemented from the **official rulebook**, not from an aggregator
 summary. `test/rules.test.js` covers the specific rules that implementations
@@ -127,6 +128,16 @@ this codebase gets right:
 - Odd chips in a split pot go to the first seat left of the button.
 - The action clock **checks when it can** and folds only when it must, so a
   phone that locks never folds a hand that was free to continue.
+
+**Cheat**
+- Playing your last card is **not** winning — you have to survive the challenge
+  window first, and getting caught on it puts the pile in your hand like anyone
+  else. This is why going out is a phase and not a return value.
+- The **wrong** party takes the pile: a caller who is right gives it to the
+  liar, a caller who is wrong takes it themselves.
+- A partly-true claim is a lie. Three claimed, two actually Twos, is a lie.
+- Card ownership is checked server-side, including duplicates, so a doctored
+  client cannot play a card it does not hold or the same card four times.
 
 **The Council** (Secret Hitler)
 - A policy enacted by the deadlock tracker grants **no** power, resets the

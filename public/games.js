@@ -10,7 +10,7 @@
  *     dismissing a dialog
  */
 
-import { el, icon, buzz, celebrate } from './ui.js';
+import { el, icon, buzz, celebrate, toast } from './ui.js';
 
 const waiting = (text) => el('div', { class: 'banner banner--accent', text });
 const label = (text) => el('div', { class: 'label', text });
@@ -1676,4 +1676,176 @@ const holdem = {
   ],
 };
 
-export const GAME_UI = { council, oddoneout, sabotage, spectrum, nightfall, holdem };
+// ------------------------------------------------------------------- cheat --
+
+/**
+ * Which cards are selected has to outlive a re-render for the same reason the
+ * bet sizer does: someone else joining or reconnecting redraws the screen, and
+ * losing a half-built play mid-turn is maddening.
+ */
+let cheatPick = { key: null, cards: [] };
+
+function syncCheatPick(v) {
+  const key = `${v.rank}:${v.turn}:${v.phase}`;
+  if (cheatPick.key !== key) cheatPick = { key, cards: [] };
+}
+
+/** Your hand: a wrapping grid, because ten cards on a phone will not fit a row. */
+function cheatHand(ctx, v) {
+  const selectable = v.myTurn;
+  return el('div', { class: 'cheathand', role: selectable ? 'group' : null, 'aria-label': 'Your cards' },
+    (v.hand ?? []).map((card) => {
+      const picked = cheatPick.cards.includes(card);
+      const node = el('button', {
+        class: `cheatcard ${picked ? 'is-picked' : ''}`,
+        disabled: !selectable,
+        'aria-pressed': String(picked),
+        onclick: () => {
+          if (picked) cheatPick.cards = cheatPick.cards.filter((c) => c !== card);
+          // Four is the cap, and silently ignoring a fifth tap reads as broken.
+          else if (cheatPick.cards.length >= 4) return toast('Four cards is the most you can put down');
+          else cheatPick.cards = [...cheatPick.cards, card];
+          buzz('confirm');
+          ctx.rerender();
+        },
+      }, [playingCard(card, { size: 'md' })]);
+      return node;
+    }),
+  );
+}
+
+function cheatPile(ctx, v) {
+  const stack = Math.min(4, v.pileCount);
+  return el('div', { class: 'cheatpile' }, [
+    el('div', { class: 'cheatpile__stack' },
+      stack ? Array.from({ length: stack }, () => playingCard(null, { size: 'md' })) : [cardSlot()]),
+    el('div', { class: 'stack stack--tight' }, [
+      el('b', { class: 'cheatpile__n', text: String(v.pileCount) }),
+      el('span', { class: 'label', text: v.pileCount === 1 ? 'card face down' : 'cards face down' }),
+    ]),
+  ]);
+}
+
+const cheat = {
+  roleChip: (ctx) => {
+    const n = ctx.view?.counts?.[ctx.me];
+    if (n === undefined) return null;
+    return el('span', { class: 'chip', style: 'color:var(--game-accent)' }, [`${n} left`]);
+  },
+
+  body(ctx) {
+    const v = ctx.view;
+    if (!v) return [waiting('Dealing…')];
+
+    if (v.phase === 'over') {
+      const won = v.over.winner === ctx.me;
+      if (won) celebrate();
+      return [
+        outcomeBanner(`${ctx.nameOf(ctx, v.over.winner)} got rid of every card`, won ? 'banner--good' : ''),
+        label('Left holding'),
+        el('ul', { class: 'plist' }, v.over.standings.map((s) => {
+          const p = ctx.room.players.find((x) => x.id === s.id) ?? { id: s.id, name: 'Player', online: true };
+          return ctx.playerTile(ctx, p, {
+            sub: s.cards === 0 ? 'Nothing' : `${s.cards} card${s.cards === 1 ? '' : 's'}`,
+            state: s.place === 1 ? 'WON' : undefined,
+          });
+        })),
+      ];
+    }
+
+    const claim = v.lastPlay && el('div', { class: 'card center stack stack--tight' }, [
+      label(`${ctx.nameOf(ctx, v.lastPlay.by)} says`),
+      el('b', { class: 'secret__value', text: `${v.lastPlay.count} × ${v.lastPlay.rankName}` }),
+      v.lastPlay.cards
+        ? el('div', { class: 'row', style: 'justify-content:center;gap:var(--sp-2)' },
+            v.lastPlay.cards.map((c) => playingCard(c, { size: 'md' })))
+        : el('div', { class: 'row', style: 'justify-content:center;gap:var(--sp-2)' },
+            Array.from({ length: v.lastPlay.count }, () => playingCard(null, { size: 'md' }))),
+    ]);
+
+    const verdict = v.reveal && outcomeBanner(
+      v.reveal.lying
+        ? `${ctx.nameOf(ctx, v.lastPlay.by)} was lying — ${ctx.nameOf(ctx, v.reveal.loser)} takes ${v.reveal.pileSize + v.lastPlay.count}`
+        : `It was true — ${ctx.nameOf(ctx, v.reveal.caller)} takes ${v.reveal.pileSize + v.lastPlay.count}`,
+      v.reveal.loser === ctx.me ? 'banner--danger' : 'banner--good',
+    );
+
+    return [
+      el('div', { class: 'row' }, [
+        el('span', { class: 'label grow', text: `Next up: ${v.rankName}` }),
+        el('span', { class: 'label', text: `${v.pileCount} in the pile` }),
+      ]),
+      cheatPile(ctx, v),
+      verdict,
+      claim,
+      v.phase === 'play' && (v.myTurn
+        ? el('div', { class: 'banner banner--accent', text: `Put down anything and call it ${v.rankName}.` })
+        : waiting(`${ctx.nameOf(ctx, v.turn)} is choosing.`)),
+      v.phase === 'challenge' && !v.canChallenge && v.lastPlay.by !== ctx.me
+        && el('div', { class: 'banner', text: 'You let it go.' }),
+      v.goingOut && el('div', { class: 'banner banner--danger', text:
+        `${ctx.nameOf(ctx, v.goingOut)} is out of cards. Call it now or they win.` }),
+      label('Your hand'),
+      cheatHand(ctx, v),
+      el('ul', { class: 'plist' }, v.order.map((id) => {
+        const p = ctx.room.players.find((x) => x.id === id) ?? { id, name: 'Player', online: true };
+        return ctx.playerTile(ctx, p, {
+          sub: `${v.counts[id]} card${v.counts[id] === 1 ? '' : 's'}`,
+          state: id === v.turn && v.phase === 'play' ? 'turn' : undefined,
+        });
+      })),
+    ].filter(Boolean);
+  },
+
+  bottom(ctx) {
+    const v = ctx.view;
+    if (!v) return bottom([]);
+    if (v.phase === 'over') return playAgainBar(ctx);
+    if (v.phase === 'reveal') return waitingBar('Next player up…');
+
+    if (v.phase === 'challenge') {
+      if (v.lastPlay.by === ctx.me) return waitingBar('See if anyone calls it');
+      if (!v.canChallenge) return waitingBar('Waiting for the others');
+      return bottom([
+        el('div', { class: 'row row--split' }, [
+          el('button', {
+            class: 'btn btn--danger grow',
+            onclick: () => ctx.send({ type: 'challenge' }),
+          }, [`Cheat!`]),
+          el('button', {
+            class: 'btn btn--secondary grow',
+            onclick: () => ctx.send({ type: 'pass' }),
+          }, ['Let it go']),
+        ]),
+      ]);
+    }
+
+    if (!v.myTurn) return waitingBar(`Waiting for ${ctx.nameOf(ctx, v.turn)}`);
+
+    syncCheatPick(v);
+    const n = cheatPick.cards.length;
+    return bottom([
+      primary(n ? `Play ${n} as ${v.rankName}` : `Pick cards to call ${v.rankName}`, {
+        disabled: n === 0,
+        onclick: () => {
+          const cards = cheatPick.cards;
+          cheatPick = { key: null, cards: [] };
+          ctx.send({ type: 'play', cards });
+        },
+      }),
+    ]);
+  },
+
+  options: (ctx, set) => [
+    el('div', { class: 'optionrow' }, [
+      el('span', { text: 'Time to call' }),
+      el('div', { class: 'seg' }, [[8, 'Snappy'], [15, 'Normal'], [30, 'Relaxed']].map(([val, l]) =>
+        el('button', {
+          'aria-pressed': String(ctx.room.config.challengeSeconds === val),
+          onclick: () => set({ challengeSeconds: val }),
+        }, [l]))),
+    ]),
+  ],
+};
+
+export const GAME_UI = { council, oddoneout, sabotage, spectrum, nightfall, holdem, cheat };

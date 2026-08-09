@@ -294,6 +294,10 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .stack { display: flex; flex-direction: column; gap: var(--sp-4); }
 .stack--tight { gap: var(--sp-2); }
 .row { display: flex; align-items: center; gap: var(--sp-3); }
+/* Two equal choices side by side — used where neither is the safe default and
+   giving one of them more width would be a thumb on the scale. */
+.row--split { width: 100%; }
+.row--split > * { flex: 1 1 0; min-width: 0; }
 .grow { flex: 1; min-width: 0; }
 
 /* --------------------------------------------------------------- buttons -- */
@@ -792,10 +796,18 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 /* The winning five, marked with a ring rather than a colour — colour alone
    would be invisible to a third of the table's eyes on a phone in a bar. */
 .pcard.is-best { box-shadow: 0 0 0 2px var(--success), 0 2px 8px rgba(0, 0, 0, 0.45); }
+/* background-color and background-image separately, on purpose: `background:`
+   is a shorthand, so a later background-image would wipe the colour out and
+   leave a card back you can see straight through. */
 .pcard--back {
-  background: var(--card-stock); color: transparent;
+  color: transparent;
+  background-color: var(--bg-overlay);
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--line-strong) 0 2px,
+    transparent 2px 7px
+  );
   box-shadow: inset 0 0 0 var(--hair) var(--line-2);
-  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05) 0 3px, transparent 3px 6px);
 }
 .pcard--slot {
   background: none; box-shadow: inset 0 0 0 var(--hair) var(--line); opacity: 0.5;
@@ -849,6 +861,33 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 }
 .seg--wrap { flex-wrap: wrap; }
 .seg--wrap button { flex: 1 1 0; }
+
+/* ----------------------------------------------------------------- cheat -- */
+/* Ten-plus cards on a 320px screen: a wrapping grid, not a row that scrolls.
+   Anything you have to scroll to find, you forget you have. */
+.cheathand {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2);
+  padding: var(--sp-3); border-radius: var(--r-3);
+  background: var(--bg-inset); box-shadow: inset 0 0 0 var(--hair) var(--line);
+}
+.cheatcard {
+  padding: 0; border-radius: calc(46px * 0.13); line-height: 0;
+  /* The tap target is the whole card, and a card is already thumb-sized. */
+  transition: transform 120ms ease;
+}
+.cheatcard[disabled] { opacity: 0.75; }
+.cheatcard.is-picked { transform: translateY(-10px); }
+.cheatcard.is-picked .pcard { box-shadow: 0 0 0 3px var(--game-accent), 0 6px 12px rgba(0, 0, 0, 0.4); }
+
+.cheatpile {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-3);
+  background: var(--bg-raised); box-shadow: inset 0 0 0 var(--hair) var(--line);
+}
+/* Overlapped, so the pile reads as a pile rather than a hand. */
+.cheatpile__stack { display: flex; flex: 0 0 auto; }
+.cheatpile__stack .pcard + .pcard { margin-left: -32px; }
+.cheatpile__n { font-size: var(--t-xl); font-weight: 800; color: var(--game-accent); font-variant-numeric: tabular-nums; }
 
 /* ------------------------------------------------------------ reveal log -- */
 .log { display: flex; flex-direction: column; gap: var(--sp-2); }

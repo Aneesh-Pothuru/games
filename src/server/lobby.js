@@ -624,7 +624,11 @@ function publicRoom(room, online) {
       name: p.name,
       seat: p.seat,
       left: p.left,
-      online: online.has(p.id),
+      bot: p.bot ?? false,
+      // A bot has no socket and would otherwise render as permanently
+      // disconnected, which is exactly the wrong signal for a seat that is
+      // about to act.
+      online: p.bot ? true : online.has(p.id),
     })),
     waiting: room.waiting.map((p) => ({ id: p.id, name: p.name, online: online.has(p.id) })),
   };

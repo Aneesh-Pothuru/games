@@ -76,10 +76,30 @@
   --ease-both: cubic-bezier(0.65, 0, 0.35, 1);
   --ease-snap: cubic-bezier(0.34, 1.56, 0.64, 1);
 
+  /* Sampled damped springs, matching the iOS system presets closely enough
+     that they read as native on the phone in your hand. Use the paired
+     duration — a spring curve at the wrong duration stops being physics.
+     Springs are for things that MOVE; keep --ease-out for things that only
+     change appearance, where a spring just looks like a stutter. */
+  --spring-snappy: linear(0, 0.027 4%, 0.095 8%, 0.486 24%, 0.657 32%, 0.772 39%,
+    0.858 46%, 0.936 56%, 0.981 67%, 1.004 83%, 1); /* 420ms */
+  --spring-bouncy: linear(0, 0.028 4%, 0.122 9%, 0.561 25%, 0.75 33%, 0.859 39%,
+    0.948 46%, 1.015 55%, 1.044 66%, 1.016 99%, 1); /* 550ms */
+
+  /* Every travel distance is multiplied by this. Reduced motion sets it to 0,
+     which removes movement while leaving opacity and duration intact — so an
+     animation that carries information still carries it. */
+  --motion: 1;
+
   /* type */
   --font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
     'Helvetica Neue', Arial, sans-serif;
-  --font-display: ui-sans-serif, system-ui, -apple-system, 'Segoe UI Variable Display',
+  /* A serif for the few places that carry the game's voice: titles, role
+     names, narration. iOS resolves New York, Android resolves Noto Serif.
+     Nothing else on either platform is not SF or Roboto, so one narrowly-used
+     serif is the cheapest character this app can buy — zero bytes. */
+  --font-display: ui-serif, 'New York', Georgia, 'Noto Serif', 'Times New Roman', serif;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, 'Segoe UI Variable Display',
     'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Roboto Mono',
     'Segoe UI Mono', monospace;
@@ -104,6 +124,31 @@
   --kb: 0px; /* keyboard inset, synced from VisualViewport */
 }
 
+/* A 1px border on a 3× phone is three device pixels, and reads as a drawn line
+   rather than an edge. This one rule sharpens every inset outline in the file. */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 2dppx) {
+  :root { --hair: 0.5px; }
+}
+
+/* Shadows tinted toward the game's accent rather than pure black, and split
+   into a CONTACT shadow that never scales and an AMBIENT one that does. That
+   pairing is what makes a surface read as resting on something instead of
+   floating above a blur. Plain-black fallbacks stay above for older engines. */
+@supports (color: oklch(from red l c h)) {
+  :root {
+    --shade: oklch(from var(--game-accent) 0.16 calc(c * 0.5) h);
+    --e-1: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 1px 1px oklch(from var(--shade) l c h / 0.5);
+    --e-2: 0 1px 0 rgb(255 255 255 / 0.05) inset,
+           0 1px 1px oklch(from var(--shade) l c h / 0.5),
+           0 4px 10px -2px oklch(from var(--shade) l c h / 0.5);
+    --e-3: 0 1px 0 rgb(255 255 255 / 0.06) inset,
+           0 1px 1px oklch(from var(--shade) l c h / 0.5),
+           0 12px 28px -8px oklch(from var(--shade) l c h / 0.62);
+    --e-4: 0 2px 2px oklch(from var(--shade) l c h / 0.5),
+           0 24px 60px -12px oklch(from var(--shade) l c h / 0.72);
+  }
+}
+
 /* Light: system preference with no explicit override.
    Every token is defined on bare :root first — a token defined ONLY inside a
    media query breaks when [data-theme] is set against the OS preference. */
@@ -122,10 +167,16 @@
     --info: #10559c; --warn: #8a6a00; --focus: #0a59b2;
     --team-0: #57616f; --team-1: #0a59b2; --team-2: #b03a0a;
     --team-3: #046a50; --team-4: #6e5f00; --team-5: #9333a8; --team-6: #0c6273;
-    --e-1: 0 1px 2px rgb(60 52 32 / 0.14);
-    --e-2: 0 2px 6px -1px rgb(60 52 32 / 0.16);
-    --e-3: 0 10px 24px -8px rgb(60 52 32 / 0.24);
-    --e-4: 0 22px 52px -14px rgb(60 52 32 / 0.3);
+    /* Light comes from above, so in a light theme the WHITE rim belongs on the
+       underside bevel and the top edge is a dark hairline. Reusing the dark
+       theme's top-white inset lit every surface from below. */
+    --e-1: 0 -1px 0 rgb(255 255 255 / 0.9) inset, 0 1px 0 rgb(28 25 18 / 0.05) inset,
+           0 1px 2px rgb(60 52 32 / 0.14);
+    --e-2: 0 -1px 0 rgb(255 255 255 / 0.9) inset, 0 1px 0 rgb(28 25 18 / 0.06) inset,
+           0 1px 1px rgb(60 52 32 / 0.10), 0 6px 16px -6px rgb(60 52 32 / 0.16);
+    --e-3: 0 -1px 0 rgb(255 255 255 / 0.9) inset,
+           0 1px 1px rgb(60 52 32 / 0.12), 0 10px 24px -8px rgb(60 52 32 / 0.24);
+    --e-4: 0 2px 3px rgb(60 52 32 / 0.14), 0 22px 52px -14px rgb(60 52 32 / 0.3);
     --press: inset 0 2px 5px rgb(60 52 32 / 0.22);
     --deboss: inset 0 1px 1px rgb(60 52 32 / 0.18), inset 0 -1px 0 rgb(255 255 255 / 0.7);
     --grain-op: 0.038;
@@ -148,10 +199,14 @@
   --info: #10559c; --warn: #8a6a00; --focus: #0a59b2;
   --team-0: #57616f; --team-1: #0a59b2; --team-2: #b03a0a;
   --team-3: #046a50; --team-4: #6e5f00; --team-5: #9333a8; --team-6: #0c6273;
-  --e-1: 0 1px 2px rgb(60 52 32 / 0.14);
-  --e-2: 0 2px 6px -1px rgb(60 52 32 / 0.16);
-  --e-3: 0 10px 24px -8px rgb(60 52 32 / 0.24);
-  --e-4: 0 22px 52px -14px rgb(60 52 32 / 0.3);
+  /* Same correction as the media-query copy above: white rim underneath. */
+  --e-1: 0 -1px 0 rgb(255 255 255 / 0.9) inset, 0 1px 0 rgb(28 25 18 / 0.05) inset,
+         0 1px 2px rgb(60 52 32 / 0.14);
+  --e-2: 0 -1px 0 rgb(255 255 255 / 0.9) inset, 0 1px 0 rgb(28 25 18 / 0.06) inset,
+         0 1px 1px rgb(60 52 32 / 0.10), 0 6px 16px -6px rgb(60 52 32 / 0.16);
+  --e-3: 0 -1px 0 rgb(255 255 255 / 0.9) inset,
+         0 1px 1px rgb(60 52 32 / 0.12), 0 10px 24px -8px rgb(60 52 32 / 0.24);
+  --e-4: 0 2px 3px rgb(60 52 32 / 0.14), 0 22px 52px -14px rgb(60 52 32 / 0.3);
   --press: inset 0 2px 5px rgb(60 52 32 / 0.22);
   --deboss: inset 0 1px 1px rgb(60 52 32 / 0.18), inset 0 -1px 0 rgb(255 255 255 / 0.7);
   --grain-op: 0.038;
@@ -171,7 +226,7 @@
 [data-game='spectrum']  { --game-accent: #e48fd6; }
 [data-game='nightfall'] { --game-accent: #7c6bff; }
 [data-game='cheat']     { --game-accent: #3fd98b; }
-[data-game='holdem']    { --game-accent: #d94f4f; }
+[data-game='holdem']    { --game-accent: #2fb87a; }
 [data-game='council']   { --game-accent: #e8b84b; }
 [data-game='sabotage']  { --game-accent: #ff7a45; }
 
@@ -220,7 +275,12 @@ input, select, textarea { font-size: max(16px, 1rem); }
   border-radius: inherit;
 }
 
-h1, h2, h3 { font-family: var(--font-display); font-weight: 800; margin: 0; text-wrap: balance; }
+/* Serif carries the voice; UI chrome stays on the system sans. 700 not 800:
+   Georgia and Noto Serif stop at bold, and font-synthesis-weight is off. */
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; margin: 0; text-wrap: balance; }
+.bar h1, .bar h2, .bar h3, .btn, .chip, .label, .seg button {
+  font-family: var(--font-ui);
+}
 p { margin: 0; text-wrap: pretty; }
 ul, ol { list-style: none; margin: 0; padding: 0; }
 
@@ -234,12 +294,26 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .t-sm { font-size: var(--t-sm); }
 .t-lg { font-size: var(--t-lg); line-height: 1.28; letter-spacing: -0.005em; }
 .t-xl { font-size: var(--t-xl); line-height: 1.18; letter-spacing: -0.012em; }
-.t-2xl { font-size: var(--t-2xl); line-height: 1.06; letter-spacing: -0.022em; }
-.t-3xl { font-size: var(--t-3xl); line-height: 1; letter-spacing: -0.028em; }
+/* Capped at -0.02em: iOS switches SF to its Display optical variant above
+   20pt and tightens again on its own, so asking for more reads as cramped. */
+.t-2xl { font-size: var(--t-2xl); line-height: 1.06; letter-spacing: -0.018em; }
+.t-3xl { font-size: var(--t-3xl); line-height: 1; letter-spacing: -0.02em; }
 
 .label {
   font-size: var(--t-2xs); font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.14em; color: var(--text-3);
+  /* 'case' raises punctuation to cap height in all-caps runs. Free on SF. */
+  font-feature-settings: 'case' 1;
+}
+
+/* Trims half-leading so text sits on its cap-height box. This is the fix for
+   "my padding is 12px but it looks like 10 top / 14 bottom". */
+@supports (text-box-trim: trim-both) {
+  .btn, .chip, .label, .pcard__rank, .pokerpot__amt, .raise__amt, .cheatpile__n,
+  .t-lg, .t-xl, .t-2xl, .t-3xl {
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+  }
 }
 /* Mandatory on anything that counts down or changes in place — without it a
    "1" is narrower than a "0" and the timer visibly jitters every second. */
@@ -250,6 +324,26 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .center { text-align: center; }
 
 /* ----------------------------------------------------------------- shell -- */
+/* A gradient mesh keyed to the game's accent, not a flat fill. Three large
+   low-opacity radial gradients over the base, blended — one pseudo-element,
+   no animation, and the single largest change to "does this look designed".
+   The grain on top is what stops the gradients banding on OLED. */
+.screen::before {
+  content: ''; position: fixed; inset: 0; z-index: -2; pointer-events: none;
+  background:
+    radial-gradient(120% 70% at 12% -12%, rgb(from var(--game-accent) r g b / 0.16), transparent 62%),
+    radial-gradient(95% 62% at 106% 6%, rgb(from var(--game-accent) r g b / 0.10), transparent 60%),
+    radial-gradient(150% 95% at 50% 120%, var(--bg-sunken), transparent 72%);
+}
+.screen::after {
+  content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: var(--grain); opacity: var(--grain-op);
+  mix-blend-mode: soft-light;
+}
+@supports not (color: rgb(from red r g b)) {
+  .screen::before { background: radial-gradient(150% 95% at 50% 120%, var(--bg-sunken), transparent 72%); }
+}
+
 .screen {
   display: grid;
   /* minmax(0,1fr) is load-bearing: plain 1fr has an auto min-size and refuses
@@ -313,10 +407,32 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
     background-color var(--d-2) var(--ease-out), opacity var(--d-2) linear;
 }
 .btn--block { display: flex; width: 100%; min-height: var(--tap-lg); }
+/* The primary action wears the game's accent, so a poker screen is not gold
+   with one green number on it. Falls back to the flat house gold wherever
+   relative colour is unavailable. */
 .btn--primary {
   background: linear-gradient(180deg, var(--accent-hi), var(--accent));
   color: var(--text-on-accent);
   box-shadow: var(--e-2), inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+@supports (color: oklch(from red l c h)) {
+  .btn--primary {
+    background: linear-gradient(180deg in oklab,
+      oklch(from var(--game-accent) calc(l + 0.06) c h),
+      var(--game-accent) 58%,
+      oklch(from var(--game-accent) calc(l - 0.045) calc(c * 1.05) h));
+    /* A tinted dark rather than pure black: the single most recognisable
+       "expensive" cue available, and it costs one line. */
+    color: oklch(from var(--game-accent) 0.2 calc(c * 0.3) h);
+    box-shadow:
+      inset 0 1px 0 oklch(from var(--game-accent) 0.96 calc(c * 0.4) h / 0.5),
+      inset 0 -1px 0 oklch(from var(--game-accent) 0.32 c h / 0.5),
+      0 1px 1px oklch(from var(--game-accent) 0.22 c h / 0.4),
+      0 5px 14px -4px oklch(from var(--game-accent) 0.48 c h / 0.34);
+  }
+  .btn--primary:active:not([disabled]) {
+    background: oklch(from var(--game-accent) calc(l - 0.06) c h);
+  }
 }
 .btn--secondary {
   background: var(--bg-raised); color: var(--text-1);
@@ -330,6 +446,12 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .btn--ghost { background: none; color: var(--text-2); box-shadow: none; min-height: var(--tap); }
 .btn:active:not([disabled]) { transform: translateY(1px) scale(0.985); box-shadow: var(--press); }
 .btn--primary:active:not([disabled]) { background: var(--accent-lo); }
+/* Asymmetric press: instant on the way down, eased on the way back. */
+.btn { transition: transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out); }
+.btn:active:not([disabled]) {
+  transition-duration: 55ms;
+  transform: scale(calc(1 - 0.028 * var(--motion))) translateY(calc(1px * var(--motion)));
+}
 .btn--danger:active:not([disabled]) { background: var(--danger-fill); }
 /* Disabled loses its rim-light and gains an inset — a SHAPE cue, not just alpha */
 .btn[disabled], .btn[aria-disabled='true'] {
@@ -443,8 +565,8 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 }
 .rolecard__glyph { width: 40px; height: 40px; color: var(--tc, var(--game-accent)); }
 .rolecard__name {
-  margin: 0; font-size: var(--t-2xl); line-height: 1; letter-spacing: -0.02em;
-  color: var(--text-1); text-shadow: 0 2px 0 rgb(0 0 0 / 0.55);
+  margin: 0; font-size: var(--t-2xl); line-height: 1.04; letter-spacing: -0.012em;
+  color: var(--text-1);
 }
 .rolecard__obj { font-size: var(--t-sm); color: var(--text-2); max-width: 24ch; }
 
@@ -773,60 +895,204 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 
 /* ---------------------------------------------------------- playing cards - */
 /* Cards are typography, not artwork: no images, no web fonts, nothing to load.
-   The rank sits top-left and the suit fills the body, so a card is still
-   readable when it is 26px wide in a seat row. */
+   CHILD metrics are a fraction of the card's own RENDERED width via container
+   query units, not of the --pc-w we asked for: on the board the cards
+   flex-shrink below --pc-w, and a calc() off the requested width leaves
+   oversized glyphs on an undersized card.
+   Properties set on the CARD ITSELF must use calc(var(--pc-w) * n) instead.
+   Container query units on the container resolve against the nearest ANCESTOR
+   container — the viewport, here — and are dropped outright for anything that
+   affects the container's own size. Measured: `inset 0 0 0 5.5cqw` on a 46px
+   card produced a 21px frame that swallowed the whole face, and `padding: 7cqw`
+   was silently discarded. */
 .pcard {
   --pc-w: 46px;
+  container-type: inline-size;
   position: relative; display: inline-flex; flex-direction: column;
   align-items: center; justify-content: center;
-  width: var(--pc-w); height: calc(var(--pc-w) * 1.4);
-  border-radius: calc(var(--pc-w) * 0.13);
-  background: #f6f3ea; color: #14181f;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5), inset 0 0 0 var(--hair) rgba(0, 0, 0, 0.28);
+  width: var(--pc-w); height: calc(var(--pc-w) * 1.4); /* 2.5 x 3.5in */
+  /* A real card's corner is 1/8in on a 2.5in card — 5% of its width. 13% read
+     as an app tile; 7% reads as a card without looking laser-cut.
+     NOT in cqw: container query units used ON the container resolve against
+     the nearest ANCESTOR container, not the element itself, so 7cqw here was
+     7% of the viewport and every card came out a pill. */
+  border-radius: calc(var(--pc-w) * 0.07);
+  background: linear-gradient(177deg, #fffdf7 0%, #f6f3ea 55%, #efeade 100%);
+  color: #14181f;
+  box-shadow:
+    inset 0 0 0 var(--hair) rgb(20 24 31 / 0.3),
+    inset 0 1px 0 rgb(255 255 255 / 0.85),
+    0 1px 1px rgb(20 24 31 / 0.4);
   font-variant-numeric: tabular-nums; line-height: 1; user-select: none;
+  /* Rank and suit are trimmed to their ink boxes, so without an explicit gap
+     a J and a heart butt into each other and read as one shape. */
+  gap: calc(var(--pc-w) * 0.05);
 }
 .pcard--xs { --pc-w: 22px; }
 .pcard--sm { --pc-w: 32px; }
 .pcard--md { --pc-w: 46px; }
 .pcard--lg { --pc-w: 74px; }
-.pcard__rank { font-size: calc(var(--pc-w) * 0.44); font-weight: 800; letter-spacing: -0.02em; }
-.pcard__suit { font-size: calc(var(--pc-w) * 0.4); line-height: 1; }
+
+/* Small: two glyphs, both as large as they will go. Below ~13px a rank is not
+   readable at arm's length, which is the whole job at this size. */
+.pcard__rank { font-size: 56cqw; font-weight: 800; letter-spacing: -0.03em; }
+.pcard__suit { font-size: 40cqw; line-height: 1; }
+
+/* Large: a corner index plus one big centre suit. Real pip layouts are the
+   traditional answer and the wrong one here — seven diamonds at 74px are 11px
+   each, which is noise. The index carries the information; the watermark is
+   atmosphere, and it is what makes the card read as a card at a glance.
+   Keyed on the size class, NOT on @container: a container query can only ever
+   style DESCENDANTS of the container, so `@container { .pcard { padding } }`
+   silently never applies to the card it is written for. The glyphs inside stay
+   in cqw so they still track the card if it flex-shrinks. */
+.pcard--lg {
+  align-items: flex-start; justify-content: flex-start;
+  padding: calc(var(--pc-w) * 0.07) calc(var(--pc-w) * 0.08);
+}
+/* cqw resolves against the container's CONTENT box, so adding padding above
+   shrank these. Sized so the big card's index is genuinely the largest rank on
+   screen — it was coming out smaller than the board's. */
+.pcard--lg .pcard__rank { font-size: 44cqw; letter-spacing: -0.04em; position: relative; z-index: 1; }
+.pcard--lg .pcard__suit { font-size: 30cqw; position: relative; z-index: 1; }
+/* The centre suit is a watermark, not a second index. At full strength it
+   fights the corner for the same 74px and neither wins; sat behind the index
+   it just reads as two spades of different sizes. Bottom-right keeps it clear. */
+.pcard--lg::before {
+  content: attr(data-suit);
+  position: absolute; inset: auto 0 0 auto; z-index: 0;
+  width: 80cqw; height: 80cqw;
+  display: grid; place-items: center;
+  font-size: 66cqw; line-height: 1; opacity: 0.12; pointer-events: none;
+}
+
 .pcard--red { color: #c62f28; }
 .pcard--black { color: #14181f; }
 .pcard.is-dim { opacity: 0.42; }
+
 /* The winning five, marked with a ring rather than a colour — colour alone
-   would be invisible to a third of the table's eyes on a phone in a bar. */
-.pcard.is-best { box-shadow: 0 0 0 2px var(--success), 0 2px 8px rgba(0, 0, 0, 0.45); }
-/* background-color and background-image separately, on purpose: `background:`
-   is a shorthand, so a later background-image would wipe the colour out and
-   leave a card back you can see straight through. */
+   would be invisible to a third of the table's eyes on a phone in a bar. The
+   lift and the sheen are the reward on top of that, not instead of it. */
+.pcard.is-best {
+  box-shadow:
+    inset 0 0 0 var(--hair) rgb(20 24 31 / 0.3),
+    0 0 0 2px var(--success),
+    0 6px 14px -4px rgb(20 24 31 / 0.5);
+  transform: translateY(calc(-6px * var(--motion)));
+  transition: transform 220ms var(--spring-snappy);
+}
+
+/* A single sweep of light across the winning cards. @property is what makes a
+   custom property animatable at all; without the registration this is a step
+   function from one value to the other. */
+@property --sheen { syntax: '<percentage>'; initial-value: -35%; inherits: false; }
+.pcard.is-best::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(105deg,
+    transparent var(--sheen),
+    rgb(255 255 255 / 0.6) calc(var(--sheen) + 11%),
+    transparent calc(var(--sheen) + 24%));
+  animation: sheen 820ms var(--ease-out) both;
+}
+@keyframes sheen { to { --sheen: 115%; } }
+
+/* Card backs. The single biggest "this is a real card" cue is the frame of
+   stock colour around the pattern — without it a back reads as a swatch.
+   background-color and background-image are set separately on purpose:
+   `background:` is a shorthand, so a later background-image wipes the colour
+   out and leaves a back you can see straight through. */
 .pcard--back {
+  --bk: #2b3350;
   color: transparent;
-  background-color: var(--bg-overlay);
-  background-image: repeating-linear-gradient(
-    45deg,
-    var(--line-strong) 0 2px,
-    transparent 2px 7px
-  );
-  box-shadow: inset 0 0 0 var(--hair) var(--line-2);
+  background-color: var(--bk);
+  background-image:
+    repeating-conic-gradient(from 45deg, #39426a 0deg 90deg, var(--bk) 90deg 180deg),
+    radial-gradient(closest-side, #454f7d 0 38%, transparent 40%);
+  background-size: calc(var(--pc-w) * 0.14) calc(var(--pc-w) * 0.14), 100% 100%;
+  background-position: center;
+  box-shadow:
+    inset 0 0 0 calc(var(--pc-w) * 0.055) #f2eee2,
+    inset 0 0 0 calc(var(--pc-w) * 0.075) #1e2440,
+    inset 0 0 0 var(--hair) rgb(20 24 31 / 0.4),
+    0 1px 1px rgb(20 24 31 / 0.4);
 }
 .pcard--slot {
   background: none; box-shadow: inset 0 0 0 var(--hair) var(--line); opacity: 0.5;
 }
+.pcard--back::before, .pcard--slot::before { content: none; }
+
+/* Dealing: from a fixed origin, staggered, and short. This is replayed dozens
+   of times a session, so the whole flop lands inside 480ms. */
+@keyframes deal {
+  from {
+    transform: translate3d(calc(var(--dx, 0px) * var(--motion)), calc(var(--dy, -40px) * var(--motion)), 0)
+               rotate(calc(-14deg * var(--motion))) scale(calc(1 - 0.08 * var(--motion)));
+    opacity: 0;
+  }
+  60% { opacity: 1; }
+  to { transform: none; opacity: 1; }
+}
+.pcard.is-dealing {
+  animation: deal 290ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 62ms * var(--motion));
+}
 
 /* ---------------------------------------------------------------- holdem -- */
 .pokerpot {
-  display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
 }
-.pokerpot__amt { font-size: var(--t-xl); font-weight: 800; color: var(--game-accent); font-variant-numeric: tabular-nums; }
+.pokerpot__mid { display: flex; align-items: center; gap: var(--sp-2); }
+.pokerpot__amt {
+  font-size: var(--t-xl); font-weight: 800; color: var(--game-accent);
+  font-variant-numeric: tabular-nums; font-family: var(--font-ui);
+}
+/* The pot as chips, not as a number. One element: the gradient IS the stack,
+   so a 40-chip pot costs the same as a 4-chip one. */
+.chipstack {
+  --c: #c2402f; --n: 6; --band: 4px; --w: 26px;
+  width: var(--w); height: calc(var(--n) * var(--band)); flex: 0 0 auto;
+  border-radius: calc(var(--w) / 2) / var(--band);
+  background: repeating-linear-gradient(180deg,
+    var(--c) 0 calc(var(--band) - 1px),
+    rgb(0 0 0 / 0.35) calc(var(--band) - 1px) var(--band));
+  box-shadow:
+    inset 0 var(--band) 0 rgb(255 255 255 / 0.28),
+    inset 0 0 0 1px rgb(0 0 0 / 0.4),
+    0 2px 3px rgb(0 0 0 / 0.5);
+  transition: height 260ms var(--ease-out);
+}
+.chiprow { display: flex; align-items: flex-end; gap: 3px; min-height: 24px; }
+/* Felt, but only here — a full-screen felt reads as a 2009 casino skin. As an
+   inset panel it reads as a TABLE inside the app, which is the goal.
+   Four ingredients make it fabric rather than green paint: an off-centre
+   specular sheen, a vignette, a fine cross-hatch, and the page grain on top.
+   Drop any one and it stops working. */
 .pokerboard {
+  --felt: #245240;
   display: flex; gap: var(--sp-2); justify-content: center; align-items: center;
-  padding: var(--sp-3) var(--sp-2); border-radius: var(--r-3);
-  background: var(--bg-inset); box-shadow: inset 0 0 0 var(--hair) var(--line);
-  /* Five cards must fit at 320px. They shrink rather than wrap or overflow. */
-  min-width: 0;
+  padding: var(--sp-4) var(--sp-3); border-radius: var(--r-4);
+  min-width: 0; position: relative; isolation: isolate;
+  background-color: var(--felt);
+  background-image:
+    radial-gradient(120% 80% at 34% 8%, rgb(255 255 255 / 0.07), transparent 58%),
+    radial-gradient(130% 110% at 50% 122%, rgb(0 0 0 / 0.45), transparent 66%),
+    repeating-linear-gradient(45deg, rgb(255 255 255 / 0.016) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(-45deg, rgb(0 0 0 / 0.025) 0 1px, transparent 1px 3px);
+  box-shadow:
+    inset 0 0 0 var(--hair) #16342a,
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -16px 28px -16px rgb(0 0 0 / 0.65),
+    0 1px 1px rgb(0 0 0 / 0.4);
 }
-.pokerboard .pcard { --pc-w: min(46px, 16vw); flex: 0 0 auto; }
+.pokerboard::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  background-image: var(--grain); opacity: 0.05;
+  mix-blend-mode: soft-light; pointer-events: none;
+}
+/* Five cards must fit at 320px. They shrink rather than wrap or overflow —
+   which is exactly why the card's own metrics are in cqw and not in --pc-w. */
+.pokerboard .pcard { --pc-w: min(46px, 15.5vw); flex: 0 0 auto; }
 
 .pokerhand {
   display: flex; align-items: center; gap: var(--sp-4);
@@ -890,6 +1156,28 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 .cheatpile__stack .pcard + .pcard { margin-left: -32px; }
 .cheatpile__n { font-size: var(--t-xl); font-weight: 800; color: var(--game-accent); font-variant-numeric: tabular-nums; }
 
+/* @starting-style plus allow-discrete is what lets a <dialog> animate OUT.
+   Before these, display:none cut the exit animation off at frame one, which is
+   why almost every hand-rolled sheet on the web pops rather than closes. */
+@supports (transition-behavior: allow-discrete) {
+  .sheet {
+    opacity: 0;
+    translate: 0 calc(16px * var(--motion));
+    transition:
+      opacity var(--d-3) var(--ease-out),
+      translate var(--d-4) var(--spring-snappy),
+      display var(--d-4) allow-discrete,
+      overlay var(--d-4) allow-discrete;
+  }
+  .sheet[open] { opacity: 1; translate: 0 0; }
+  @starting-style {
+    .sheet[open] { opacity: 0; translate: 0 calc(16px * var(--motion)); }
+  }
+  .sheet::backdrop { background: rgb(4 6 10 / 0); transition: background var(--d-3); }
+  .sheet[open]::backdrop { background: var(--scrim); }
+  @starting-style { .sheet[open]::backdrop { background: rgb(4 6 10 / 0); } }
+}
+
 /* ------------------------------------------------------------ reveal log -- */
 .log { display: flex; flex-direction: column; gap: var(--sp-2); }
 .log li {
@@ -925,6 +1213,14 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 /* Every animation here is REDUNDANT with a static cue, so removing motion
    never removes information. */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    /* Every travel distance in the file is multiplied by --motion, so zeroing
+       it removes movement while leaving opacity and duration alone. An
+       animation that carries information still carries it. */
+    --motion: 0;
+    --spring-snappy: linear(0, 1);
+    --spring-bouncy: linear(0, 1);
+  }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

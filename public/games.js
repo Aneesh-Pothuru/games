@@ -206,9 +206,15 @@ function playingCard(card, opts = {}) {
       'pcard', `pcard--${opts.size ?? 'md'}`,
       suit.red ? 'pcard--red' : 'pcard--black',
       opts.dim ? 'is-dim' : '', opts.best ? 'is-best' : '',
+      opts.deal ? 'is-dealing' : '',
     ].join(' '),
     role: 'img',
     'aria-label': `${rank} of ${suit.name}`,
+    // The big centre pip on large cards is drawn by CSS from this attribute,
+    // so it exists only at sizes where it is legible and never becomes a
+    // second copy of the suit for a screen reader to read out.
+    'data-suit': suit.glyph,
+    style: opts.index !== undefined ? `--i:${opts.index}` : '',
   }, [
     el('span', { class: 'pcard__rank', text: rank }),
     el('span', { class: 'pcard__suit', text: suit.glyph }),
@@ -1424,10 +1430,46 @@ function syncRaiseUi(v) {
 
 const STREET_NAME = { preflop: 'Pre-flop', flop: 'Flop', turn: 'Turn', river: 'River' };
 
+/**
+ * The pot rendered as chips as well as a number.
+ *
+ * A number alone tells you the size; a stack tells you at a glance whether
+ * this pot is worth fighting for, which is the read you actually want across
+ * a table. One element per denomination, never one per chip.
+ */
+const CHIP_TIERS = [
+  { at: 5000, colour: '#3c3f52', label: 'black' },
+  { at: 1000, colour: '#2f5aa8', label: 'blue' },
+  { at: 500, colour: '#4a8a52', label: 'green' },
+  { at: 100, colour: '#c2402f', label: 'red' },
+  { at: 0, colour: '#cbb27a', label: 'tan' },
+];
+
+function chipStacks(amount) {
+  if (amount <= 0) return null;
+  const stacks = [];
+  let left = amount;
+  for (const tier of CHIP_TIERS) {
+    const unit = tier.at || Math.max(1, Math.round(amount / 20));
+    const n = Math.min(12, Math.floor(left / unit));
+    if (n > 0) {
+      stacks.push(el('span', {
+        class: 'chipstack', style: `--c:${tier.colour};--n:${n}`, 'aria-hidden': 'true',
+      }));
+      left -= n * unit;
+    }
+    if (stacks.length >= 3) break;
+  }
+  return stacks.length ? el('span', { class: 'chiprow' }, stacks) : null;
+}
+
 function potStrip(v) {
   return el('div', { class: 'pokerpot' }, [
     el('span', { class: 'label', text: `${STREET_NAME[v.street] ?? ''} · Hand ${v.handNo}` }),
-    el('b', { class: 'pokerpot__amt', text: `${chips(v.potTotal)}` }),
+    el('span', { class: 'pokerpot__mid' }, [
+      chipStacks(v.potTotal),
+      el('b', { class: 'pokerpot__amt', text: `${chips(v.potTotal)}` }),
+    ].filter(Boolean)),
     el('span', { class: 'label', text: `Blinds ${chips(v.blinds.sb)}/${chips(v.blinds.bb)}` }),
   ]);
 }
@@ -1439,10 +1481,21 @@ function boardRow(ctx, v) {
   const best = new Set(v.seats.find((s) => s.id === ctx.me)?.best ?? []);
   const cards = [];
   for (let i = 0; i < 5; i++) {
-    cards.push(v.board[i] === undefined ? cardSlot() : playingCard(v.board[i], { best: best.has(v.board[i]) }));
+    cards.push(v.board[i] === undefined
+      ? cardSlot()
+      // Only cards dealt on THIS street animate. Re-animating the whole board
+      // every time a card lands is the tell of a cheap web card game.
+      : playingCard(v.board[i], {
+          best: best.has(v.board[i]),
+          deal: i >= dealtBefore(v.street),
+          index: i - dealtBefore(v.street),
+        }));
   }
   return el('div', { class: 'pokerboard' }, cards);
 }
+
+/** How many board cards were already down before the current street. */
+const dealtBefore = (street) => ({ preflop: 0, flop: 0, turn: 3, river: 4 }[street] ?? 5);
 
 /** Your own two cards, always the largest thing on the screen. */
 function myCards(ctx, v) {

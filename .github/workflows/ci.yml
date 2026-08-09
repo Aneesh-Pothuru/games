@@ -41,6 +41,8 @@ jobs:
 
       - run: npx playwright install --with-deps chromium
 
+      # Includes visual.mjs, which asserts computed CSS values — invalid CSS
+      # drops one declaration and renders anyway, so nothing else catches it.
       - name: Browser tests on phone viewports
         run: npm run test:browser
 

@@ -1,0 +1,766 @@
+/* ============================================================================
+   PARLOUR — design system
+   Zero web fonts, zero image files, zero frameworks. Hand-written CSS + SVG.
+   Dark-first, because these games are played at night in dim rooms.
+   ========================================================================= */
+
+/* ---------------------------------------------------------------- tokens -- */
+:root {
+  color-scheme: dark light;
+
+  /* surfaces */
+  --bg-sunken: #06080c;
+  --bg-base: #0b0e14;
+  --bg-inset: #10141b;
+  --bg-raised: #151a23;
+  --bg-overlay: #1e242f;
+  --bg-hover: #242b38;
+  --scrim: rgb(4 6 10 / 0.74);
+
+  /* text — never pure white: halation on OLED in a dark room */
+  --text-1: #f5f1e6;
+  --text-2: #b6becc;
+  --text-3: #8b95a5;
+  --text-off: #5b6472; /* decorative only, fails AA by design */
+  --text-on-accent: #0b0e14;
+  --text-on-danger: #f7f3ea;
+
+  /* lines */
+  --line: #232a36;
+  --line-2: #333b4a;
+  --line-strong: #6b7688;
+
+  /* semantic */
+  --accent: #e8b84b;
+  --accent-hi: #f2c864;
+  --accent-lo: #cfa13b;
+  --danger: #ff6b5e;
+  --danger-fill: #b7332a;
+  --danger-fill-hi: #ce3b30;
+  --success: #3fd98b;
+  --success-fill: #147a50;
+  --info: #66b8f5;
+  --warn: #f5b63d;
+  --focus: #7fd3ff;
+
+  /* teams — hue is one of THREE channels; see .tm glyph + pattern */
+  --team-0: #8b95a5;
+  --team-1: #5ba8ff;
+  --team-2: #ff7a45;
+  --team-3: #2fd3a0;
+  --team-4: #f2e14d;
+  --team-5: #e48fd6;
+  --team-6: #45d6e8;
+
+  --game-accent: var(--accent);
+
+  /* space / radii / metrics */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
+  --r-1: 4px; --r-2: 8px; --r-3: 12px; --r-4: 18px; --r-5: 26px; --r-pill: 999px;
+  --tap: 48px; --tap-lg: 56px; --shell: 520px; --shell-wide: 640px; --hair: 1px;
+
+  /* elevation — each pairs a rim-light inset with a drop shadow, which is
+     what separates "physical card" from "div with a shadow" */
+  --e-1: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 1px 2px rgb(0 0 0 / 0.5);
+  --e-2: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 4px 10px -2px rgb(0 0 0 / 0.6);
+  --e-3: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 12px 28px -8px rgb(0 0 0 / 0.7);
+  --e-4: 0 24px 60px -12px rgb(0 0 0 / 0.8);
+  --press: inset 0 2px 6px rgb(0 0 0 / 0.55);
+  --deboss: inset 0 1px 1px rgb(0 0 0 / 0.7), inset 0 -1px 0 rgb(255 255 255 / 0.05);
+
+  /* motion */
+  --d-1: 90ms; --d-2: 160ms; --d-3: 240ms; --d-4: 420ms; --d-5: 700ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-both: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-snap: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* type */
+  --font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-display: ui-sans-serif, system-ui, -apple-system, 'Segoe UI Variable Display',
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Roboto Mono',
+    'Segoe UI Mono', monospace;
+
+  /* 17px body floor: read at arm's length, at an angle, in the dark */
+  --t-2xs: clamp(11px, 2.6vw, 13px);
+  --t-xs: clamp(13px, 3.1vw, 15px);
+  --t-sm: clamp(15px, 3.6vw, 17px);
+  --t-md: clamp(17px, 4.2vw, 19px);
+  --t-lg: clamp(20px, 5vw, 24px);
+  --t-xl: clamp(25px, 6.4vw, 31px);
+  --t-2xl: clamp(32px, 8.6vw, 42px);
+  --t-3xl: clamp(42px, 12vw, 60px);
+  --t-4xl: clamp(50px, 15vw, 80px);
+
+  /* grain: rasterized once when the data-URI decodes, then it is a cached
+     bitmap. Applying filter:url() to live DOM would re-run it every frame. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+  --grain-op: 0.055;
+  --card-stock: linear-gradient(158deg, #1b212c 0%, #141922 46%, #10151d 100%);
+
+  --kb: 0px; /* keyboard inset, synced from VisualViewport */
+}
+
+/* Light: system preference with no explicit override.
+   Every token is defined on bare :root first — a token defined ONLY inside a
+   media query breaks when [data-theme] is set against the OS preference. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light dark;
+    --bg-sunken: #e8e3d6; --bg-base: #f4f1e9; --bg-inset: #ede9de;
+    --bg-raised: #fff; --bg-overlay: #fff; --bg-hover: #f0ece1;
+    --scrim: rgb(28 25 18 / 0.46);
+    --text-1: #16191f; --text-2: #4a5260; --text-3: #57616f; --text-off: #98a0ac;
+    --text-on-accent: #16191f; --text-on-danger: #fff;
+    --line: #ddd7c8; --line-2: #c9c2b0; --line-strong: #807965;
+    --accent: #b4870f; --accent-hi: #c9971a; --accent-lo: #8f6b08;
+    --danger: #a82a20; --danger-fill: #b7332a; --danger-fill-hi: #9c2a21;
+    --success: #046a50; --success-fill: #046a50;
+    --info: #10559c; --warn: #8a6a00; --focus: #0a59b2;
+    --team-0: #57616f; --team-1: #0a59b2; --team-2: #b03a0a;
+    --team-3: #046a50; --team-4: #6e5f00; --team-5: #9333a8; --team-6: #0c6273;
+    --e-1: 0 1px 2px rgb(60 52 32 / 0.14);
+    --e-2: 0 2px 6px -1px rgb(60 52 32 / 0.16);
+    --e-3: 0 10px 24px -8px rgb(60 52 32 / 0.24);
+    --e-4: 0 22px 52px -14px rgb(60 52 32 / 0.3);
+    --press: inset 0 2px 5px rgb(60 52 32 / 0.22);
+    --deboss: inset 0 1px 1px rgb(60 52 32 / 0.18), inset 0 -1px 0 rgb(255 255 255 / 0.7);
+    --grain-op: 0.038;
+    --card-stock: linear-gradient(158deg, #fffdf7 0%, #faf7ee 52%, #f2eee2 100%);
+  }
+}
+
+/* Light: explicit toggle. Must repeat in full — CSS has no @extend. */
+:root[data-theme='light'] {
+  color-scheme: light dark;
+  --bg-sunken: #e8e3d6; --bg-base: #f4f1e9; --bg-inset: #ede9de;
+  --bg-raised: #fff; --bg-overlay: #fff; --bg-hover: #f0ece1;
+  --scrim: rgb(28 25 18 / 0.46);
+  --text-1: #16191f; --text-2: #4a5260; --text-3: #57616f; --text-off: #98a0ac;
+  --text-on-accent: #16191f; --text-on-danger: #fff;
+  --line: #ddd7c8; --line-2: #c9c2b0; --line-strong: #807965;
+  --accent: #b4870f; --accent-hi: #c9971a; --accent-lo: #8f6b08;
+  --danger: #a82a20; --danger-fill: #b7332a; --danger-fill-hi: #9c2a21;
+  --success: #046a50; --success-fill: #046a50;
+  --info: #10559c; --warn: #8a6a00; --focus: #0a59b2;
+  --team-0: #57616f; --team-1: #0a59b2; --team-2: #b03a0a;
+  --team-3: #046a50; --team-4: #6e5f00; --team-5: #9333a8; --team-6: #0c6273;
+  --e-1: 0 1px 2px rgb(60 52 32 / 0.14);
+  --e-2: 0 2px 6px -1px rgb(60 52 32 / 0.16);
+  --e-3: 0 10px 24px -8px rgb(60 52 32 / 0.24);
+  --e-4: 0 22px 52px -14px rgb(60 52 32 / 0.3);
+  --press: inset 0 2px 5px rgb(60 52 32 / 0.22);
+  --deboss: inset 0 1px 1px rgb(60 52 32 / 0.18), inset 0 -1px 0 rgb(255 255 255 / 0.7);
+  --grain-op: 0.038;
+  --card-stock: linear-gradient(158deg, #fffdf7 0%, #faf7ee 52%, #f2eee2 100%);
+}
+
+/* Dark toggle under a light OS: bare :root already holds the dark values. */
+:root[data-theme='dark'] { color-scheme: dark light; }
+
+@media (prefers-contrast: more) {
+  :root { --text-2: #d6dce6; --text-3: #aeb6c4; --line: #3a4252; --line-2: #4e5768; }
+}
+
+/* Per-game identity: exactly two knobs — an accent and an emblem. Everything
+   else is shared, which is what keeps N games at one stylesheet. */
+[data-game='oddoneout'] { --game-accent: #45d6e8; }
+[data-game='council']   { --game-accent: #e8b84b; }
+[data-game='sabotage']  { --game-accent: #ff7a45; }
+[data-game='nightfall'] { --game-accent: #7c6bff; }
+[data-game='oneword']   { --game-accent: #3fd98b; }
+[data-game='oddprompt'] { --game-accent: #e48fd6; }
+
+/* ----------------------------------------------------------------- reset -- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  background: var(--bg-base);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  height: 100vh;   /* legacy fallback */
+  height: 100dvh;  /* the shell never scrolls, so dvh == svh permanently */
+  overflow: hidden;
+  overscroll-behavior: none; /* no pull-to-refresh, no rubber-band chaining */
+  background: var(--bg-base);
+  color: var(--text-1);
+  font-family: var(--font-body);
+  font-size: var(--t-md);
+  line-height: 1.5;
+  font-synthesis-weight: none; /* stop fake-bold mush on Android */
+  -webkit-tap-highlight-color: transparent;
+  /* manipulation kills double-tap zoom but KEEPS pinch-zoom (WCAG 1.4.4) */
+  touch-action: manipulation;
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; touch-action: manipulation; }
+/* Never below 16px computed or iOS Safari zooms the viewport on focus. */
+input, select, textarea { font-size: max(16px, 1rem); }
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+h1, h2, h3 { font-family: var(--font-display); font-weight: 800; margin: 0; text-wrap: balance; }
+p { margin: 0; text-wrap: pretty; }
+ul, ol { list-style: none; margin: 0; padding: 0; }
+
+.sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.hidden { display: none !important; }
+
+/* ------------------------------------------------------------ typography -- */
+.t-sm { font-size: var(--t-sm); }
+.t-lg { font-size: var(--t-lg); line-height: 1.28; letter-spacing: -0.005em; }
+.t-xl { font-size: var(--t-xl); line-height: 1.18; letter-spacing: -0.012em; }
+.t-2xl { font-size: var(--t-2xl); line-height: 1.06; letter-spacing: -0.022em; }
+.t-3xl { font-size: var(--t-3xl); line-height: 1; letter-spacing: -0.028em; }
+
+.label {
+  font-size: var(--t-2xs); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.14em; color: var(--text-3);
+}
+/* Mandatory on anything that counts down or changes in place — without it a
+   "1" is narrower than a "0" and the timer visibly jitters every second. */
+.num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'lnum' 1; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.dim { color: var(--text-2); }
+.muted { color: var(--text-3); }
+.center { text-align: center; }
+
+/* ----------------------------------------------------------------- shell -- */
+.screen {
+  display: grid;
+  /* minmax(0,1fr) is load-bearing: plain 1fr has an auto min-size and refuses
+     to shrink, which pushes the action bar off-screen on long content. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.bar {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding-inline: var(--sp-4); background: var(--bg-raised); z-index: 2;
+}
+.bar--top {
+  min-height: var(--tap);
+  padding-top: max(env(safe-area-inset-top), var(--sp-1));
+  padding-bottom: var(--sp-1);
+  border-bottom: var(--hair) solid var(--line);
+  box-shadow: var(--e-2);
+  justify-content: space-between;
+}
+.bar--bottom {
+  flex-direction: column; align-items: stretch; gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  padding-bottom: max(var(--sp-3), env(safe-area-inset-bottom));
+  border-top: var(--hair) solid var(--line);
+  box-shadow: 0 -8px 24px -12px rgb(0 0 0 / 0.7);
+  /* lifted above the iOS keyboard by --kb, synced from VisualViewport */
+  transform: translateY(calc(-1 * var(--kb)));
+  transition: transform var(--d-2) var(--ease-out);
+}
+
+.flow {
+  overflow-y: auto;
+  overscroll-behavior: contain; /* scroll never chains to the page */
+  padding: var(--sp-5) var(--sp-4) var(--sp-6);
+  scrollbar-width: thin;
+}
+.shell { width: 100%; max-width: var(--shell); margin-inline: auto; }
+@media (min-width: 600px) { .shell { max-width: var(--shell-wide); } }
+
+.stack { display: flex; flex-direction: column; gap: var(--sp-4); }
+.stack--tight { gap: var(--sp-2); }
+.row { display: flex; align-items: center; gap: var(--sp-3); }
+.grow { flex: 1; min-width: 0; }
+
+/* --------------------------------------------------------------- buttons -- */
+.btn {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--sp-2);
+  min-height: var(--tap); padding: 0 var(--sp-5);
+  border-radius: var(--r-4);
+  font-weight: 700; font-size: var(--t-md); letter-spacing: 0.01em;
+  user-select: none; -webkit-user-select: none;
+  transition: transform var(--d-1) var(--ease-out), box-shadow var(--d-1) var(--ease-out),
+    background-color var(--d-2) var(--ease-out), opacity var(--d-2) linear;
+}
+.btn--block { display: flex; width: 100%; min-height: var(--tap-lg); }
+.btn--primary {
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+  color: var(--text-on-accent);
+  box-shadow: var(--e-2), inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+.btn--secondary {
+  background: var(--bg-raised); color: var(--text-1);
+  box-shadow: inset 0 0 0 var(--hair) var(--line-strong), var(--e-1);
+}
+.btn--danger {
+  background: linear-gradient(180deg, var(--danger-fill-hi), var(--danger-fill));
+  color: var(--text-on-danger);
+  box-shadow: var(--e-2), inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+.btn--ghost { background: none; color: var(--text-2); box-shadow: none; min-height: var(--tap); }
+.btn:active:not([disabled]) { transform: translateY(1px) scale(0.985); box-shadow: var(--press); }
+.btn--primary:active:not([disabled]) { background: var(--accent-lo); }
+.btn--danger:active:not([disabled]) { background: var(--danger-fill); }
+/* Disabled loses its rim-light and gains an inset — a SHAPE cue, not just alpha */
+.btn[disabled], .btn[aria-disabled='true'] {
+  opacity: 0.42; pointer-events: none;
+  background: var(--bg-raised); color: var(--text-2); box-shadow: var(--deboss);
+}
+
+.iconbtn {
+  display: grid; place-items: center;
+  width: var(--tap); height: var(--tap); border-radius: var(--r-pill);
+  color: var(--text-2);
+}
+.iconbtn:active { background: var(--bg-hover); }
+
+/* ----------------------------------------------------------------- icons -- */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.ico {
+  width: 20px; height: 20px; flex: 0 0 auto; display: block;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.ico--sm { width: 16px; height: 16px; stroke-width: 1.75; }
+.ico--lg { width: 26px; height: 26px; }
+.ico--xl { width: 40px; height: 40px; stroke-width: 1.6; }
+.ico--solid { fill: currentColor; stroke: none; }
+
+/* ----------------------------------------------------------------- cards -- */
+.card {
+  position: relative; border-radius: var(--r-4); padding: var(--sp-4);
+  background: var(--card-stock);
+  box-shadow: var(--e-2), inset 0 0 0 var(--hair) var(--line-2),
+    inset 0 1px 0 rgb(255 255 255 / 0.055);
+  overflow: hidden;
+}
+.card--flat { background: var(--bg-raised); box-shadow: inset 0 0 0 var(--hair) var(--line); }
+.grain::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: var(--grain); opacity: var(--grain-op);
+  mix-blend-mode: overlay; border-radius: inherit;
+}
+.well { background: var(--bg-inset); box-shadow: var(--deboss); border-radius: var(--r-3); }
+
+/* ------------------------------------------------------------- room code -- */
+.roomcode {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+  width: 100%; padding: var(--sp-4); border-radius: var(--r-4);
+  background: var(--card-stock);
+  box-shadow: var(--e-2), inset 0 0 0 var(--hair) var(--line-2);
+}
+.roomcode__cells { display: flex; gap: var(--sp-2); }
+.roomcode__cells i {
+  font-family: var(--font-mono); font-style: normal; font-weight: 700;
+  font-size: var(--t-4xl); line-height: 1;
+  min-width: 0.74em; padding: var(--sp-2) var(--sp-1);
+  border-radius: var(--r-2); text-align: center;
+  background: var(--bg-inset); box-shadow: var(--deboss);
+  color: var(--accent); text-shadow: 0 2px 0 rgb(0 0 0 / 0.55);
+}
+.roomcode__hint { display: inline-flex; align-items: center; gap: 6px; }
+.roomcode.is-copied .roomcode__hint { color: var(--success); }
+
+/* QR needs its white plate in every theme — never invert a QR code. */
+.qr {
+  width: min(58vw, 220px); margin-inline: auto; padding: var(--sp-3);
+  background: #fff; border-radius: var(--r-3); box-shadow: var(--e-2);
+}
+.qr svg { display: block; width: 100%; height: auto; color: #0b0e14; shape-rendering: crispEdges; }
+.qr rect { fill: currentColor; }
+
+/* ------------------------------------------------------------- role card -- */
+.rolecard { perspective: 1400px; width: min(76vw, 290px); margin-inline: auto; }
+.rolecard__btn { display: block; width: 100%; aspect-ratio: 5 / 7; }
+.rolecard__inner {
+  position: relative; width: 100%; height: 100%;
+  transform-style: preserve-3d;
+  transition: transform var(--d-5) var(--ease-snap);
+  will-change: transform;
+}
+/* Hold-to-peek needs no JS at all. The exposure window is user-controlled and
+   physically self-limiting, and the holding hand shades the screen. */
+.rolecard__btn:active .rolecard__inner,
+.rolecard.is-revealed .rolecard__inner { transform: rotateY(180deg); }
+
+.rolecard__face {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--sp-3); padding: var(--sp-5);
+  border-radius: var(--r-5);
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  box-shadow: var(--e-4); overflow: hidden; text-align: center;
+}
+.rolecard__back {
+  background: var(--card-stock);
+  box-shadow: var(--e-4), inset 0 0 0 var(--hair) var(--line-2);
+}
+.rolecard__back::before {
+  content: ''; position: absolute; inset: 10px; border-radius: calc(var(--r-5) - 6px);
+  box-shadow: inset 0 0 0 var(--hair) rgb(255 255 255 / 0.09), inset 0 1px 0 rgb(0 0 0 / 0.5);
+  pointer-events: none;
+}
+.rolecard__back::after, .rolecard__front::after {
+  content: ''; position: absolute; inset: 0; background-image: var(--grain);
+  opacity: var(--grain-op); mix-blend-mode: overlay; pointer-events: none;
+}
+.rolecard__emblem { width: 64px; height: 64px; color: var(--game-accent); opacity: 0.5; }
+.rolecard__front {
+  transform: rotateY(180deg);
+  background: radial-gradient(120% 90% at 50% 0%, var(--tint, transparent), transparent 70%),
+    var(--card-stock);
+  box-shadow: var(--e-4), inset 0 0 0 2px var(--tc, var(--game-accent));
+}
+.rolecard__glyph { width: 40px; height: 40px; color: var(--tc, var(--game-accent)); }
+.rolecard__name {
+  margin: 0; font-size: var(--t-2xl); line-height: 1; letter-spacing: -0.02em;
+  color: var(--text-1); text-shadow: 0 2px 0 rgb(0 0 0 / 0.55);
+}
+.rolecard__obj { font-size: var(--t-sm); color: var(--text-2); max-width: 24ch; }
+
+.holdring { position: absolute; bottom: 16px; width: 34px; height: 34px; transform: rotate(-90deg); }
+.holdring circle { fill: none; stroke-width: 3; }
+.holdring__t { stroke: rgb(255 255 255 / 0.12); }
+.holdring__p {
+  stroke: var(--game-accent); stroke-linecap: round;
+  stroke-dasharray: 125.66; stroke-dashoffset: 125.66;
+}
+.rolecard__btn:active .holdring__p { animation: hold var(--d-5) linear forwards; }
+@keyframes hold { to { stroke-dashoffset: 0; } }
+
+/* ---------------------------------------------------------- player tiles -- */
+.plist { display: flex; flex-direction: column; gap: var(--sp-2); }
+.ptile {
+  position: relative; display: flex; align-items: center; gap: var(--sp-3);
+  min-height: 64px; padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border-radius: var(--r-3); width: 100%; text-align: left;
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 var(--hair) var(--line);
+  /* Scope invalidation to the row: these lists re-render on every message. */
+  contain: layout paint style;
+  transition: background-color var(--d-2) var(--ease-out), opacity var(--d-3) var(--ease-out);
+}
+.ptile__av {
+  flex: 0 0 auto; width: 48px; height: 48px; border-radius: var(--r-pill);
+  overflow: hidden; box-shadow: var(--deboss), 0 0 0 var(--hair) var(--line-2);
+}
+.ptile__av svg { display: block; width: 100%; height: 100%; }
+.ptile__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ptile__name {
+  font-size: var(--t-lg); font-weight: 600; line-height: 1.15;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ptile__sub { line-height: 1.2; }
+.ptile__badges { display: flex; gap: var(--sp-1); flex: 0 0 auto; }
+
+/* Selectable rows: two-stage select -> commit. A misfire is caught by reading
+   the button label, not by dismissing a dialog. */
+.ptile--pick { cursor: pointer; }
+.plist.is-picking .ptile--pick { opacity: 0.45; }
+.plist.is-picking .ptile--pick.is-selected { opacity: 1; }
+.ptile--pick.is-selected {
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 3px var(--game-accent);
+}
+.ptile--pick:active { transform: scale(0.99); }
+.ptile[disabled] { opacity: 0.4; pointer-events: none; }
+
+/* Current turn: rail + chevron + label. Three cues, never colour alone. */
+.ptile[data-state='turn'] { background: var(--bg-hover); }
+.ptile[data-state='turn']::before {
+  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--game-accent);
+}
+/* Eliminated: opacity + grayscale + halftone + strike-through + badge. */
+.ptile[data-state='dead'] { opacity: 0.55; }
+.ptile[data-state='dead'] .ptile__name { text-decoration: line-through; text-decoration-thickness: 2px; }
+.ptile[data-state='dead'] .ptile__av { filter: grayscale(1) contrast(0.85); }
+.ptile[data-state='dead']::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(circle at 2px 2px, rgb(0 0 0 / 0.42) 1.2px, transparent 1.3px) 0 0 / 5px 5px;
+}
+.ptile.is-offline .ptile__av { opacity: 0.5; }
+
+.bdg {
+  display: grid; place-items: center; width: 24px; height: 24px;
+  border-radius: var(--r-pill); background: var(--bg-overlay); color: var(--text-2);
+  box-shadow: inset 0 0 0 var(--hair) var(--line-2);
+}
+.bdg .ico { width: 14px; height: 14px; }
+.bdg--host { color: var(--accent); box-shadow: inset 0 0 0 var(--hair) var(--accent); }
+.bdg--ready { color: var(--success); box-shadow: inset 0 0 0 var(--hair) var(--success); }
+.bdg--voted { color: var(--info); }
+.bdg--dead { color: var(--danger); }
+.bdg--off {
+  color: var(--text-3);
+  background: repeating-linear-gradient(45deg, var(--bg-overlay) 0 3px, var(--bg-inset) 3px 6px);
+}
+
+/* ----------------------------------------------------------------- votes -- */
+.votepair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.vote {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-height: 76px; border-radius: var(--r-4);
+  background: var(--bg-raised); color: var(--text-2);
+  box-shadow: inset 0 0 0 2px var(--line-strong), var(--e-1);
+  font-weight: 700; font-size: var(--t-sm); letter-spacing: 0.02em;
+  transition: transform var(--d-1) var(--ease-out), box-shadow var(--d-2) var(--ease-out),
+    background-color var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out);
+}
+.vote .ico { width: 26px; height: 26px; }
+.vote:active { transform: scale(0.97); }
+.vote--yes[aria-checked='true'] {
+  background: var(--success-fill); color: #f2fbf6;
+  box-shadow: inset 0 0 0 2px var(--success), var(--press);
+}
+.vote--no[aria-checked='true'] {
+  background: var(--danger-fill); color: var(--text-on-danger);
+  box-shadow: inset 0 0 0 2px var(--danger), var(--press);
+}
+
+.tally {
+  display: flex; height: 14px; border-radius: var(--r-pill); overflow: hidden;
+  background: var(--bg-inset); box-shadow: var(--deboss);
+}
+.tally__seg { flex: var(--n) 0 0; min-width: 0; transition: flex-grow var(--d-4) var(--ease-out); }
+.tally__seg--yes {
+  background: var(--success-fill);
+  background-image: radial-gradient(circle at 3px 3px, rgb(0 0 0 / 0.3) 1.3px, transparent 1.4px);
+  background-size: 6px 6px;
+}
+.tally__seg--no {
+  background: var(--danger-fill);
+  background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgb(0 0 0 / 0.28) 4px 8px);
+}
+.tally__seg--non { background: var(--bg-hover); }
+
+/* ----------------------------------------------------------------- timer -- */
+.timer { position: relative; display: grid; place-items: center; width: 44px; height: 44px; }
+.timer__ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.timer__ring circle { fill: none; stroke-width: 6; }
+.timer__trk { stroke: var(--bg-inset); }
+.timer__bar {
+  stroke: var(--game-accent); stroke-linecap: round;
+  stroke-dasharray: 276.46;
+  stroke-dashoffset: calc(276.46 * (1 - var(--p, 1)));
+  transition: stroke-dashoffset 1s linear, stroke var(--d-3) var(--ease-out);
+}
+.timer__n { font-family: var(--font-mono); font-size: var(--t-xs); font-weight: 700; }
+.timer--hero { width: 128px; height: 128px; }
+.timer--hero .timer__n { font-size: var(--t-xl); }
+.timer.is-urgent { --game-accent: var(--danger); }
+.timer.is-urgent .timer__n { color: var(--danger); }
+.timer.is-urgent::after {
+  content: ''; position: absolute; inset: -6px; border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--danger); opacity: 0;
+  animation: urgent 1s var(--ease-out) infinite;
+}
+@keyframes urgent {
+  0% { transform: scale(0.94); opacity: 0.85; }
+  100% { transform: scale(1.14); opacity: 0; }
+}
+
+/* ----------------------------------------------------------------- pills -- */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 28px; padding: 0 12px; border-radius: var(--r-pill);
+  font-size: var(--t-2xs); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; background: var(--bg-raised); color: var(--text-2);
+  box-shadow: inset 0 0 0 var(--hair) var(--line-2);
+}
+.pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill--live { color: var(--success); }
+.pill--warn { color: var(--warn); }
+.pill--warn i { animation: breathe 0.9s var(--ease-both) infinite; }
+.pill--dead {
+  color: var(--text-3);
+  background: repeating-linear-gradient(45deg, var(--bg-raised) 0 4px, var(--bg-inset) 4px 8px);
+}
+.pill--dead i { border-radius: 1px; } /* shape changes too, not just colour */
+@keyframes breathe { 50% { opacity: 0.28; transform: scale(0.72); } }
+
+.chip {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  min-height: 34px; padding: 0 var(--sp-3); border-radius: var(--r-pill);
+  background: var(--bg-overlay); box-shadow: inset 0 0 0 var(--hair) var(--line-2);
+  font-size: var(--t-xs); font-weight: 600;
+}
+
+/* --------------------------------------------------------------- banners -- */
+.banner {
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-3);
+  background: var(--bg-overlay); box-shadow: inset 0 0 0 var(--hair) var(--line-2);
+  font-size: var(--t-sm);
+}
+.banner--accent { box-shadow: inset 0 0 0 var(--hair) var(--game-accent); }
+.banner--danger { box-shadow: inset 0 0 0 var(--hair) var(--danger); }
+.banner--good { box-shadow: inset 0 0 0 var(--hair) var(--success); }
+
+.toast {
+  position: fixed; left: 50%; translate: -50% 0;
+  top: calc(env(safe-area-inset-top) + var(--tap) + var(--sp-2));
+  z-index: 60; width: min(100% - var(--sp-6), var(--shell));
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-3);
+  background: var(--bg-overlay); color: var(--text-1);
+  box-shadow: var(--e-3), inset 0 0 0 var(--hair) var(--line-2);
+  overflow: hidden; animation: toast-in var(--d-3) var(--ease-out) both;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(-12px) scale(0.98); } }
+
+/* --------------------------------------------------------------- overlay -- */
+/* Full-screen attention takeover. Breathe, never flash: WCAG 2.3.1 forbids
+   >3 flashes/sec, and a flash reads as an error rather than a summons. */
+.turnwash {
+  position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: radial-gradient(80% 50% at 50% 0%, var(--game-accent), transparent 70%);
+  opacity: 0.14; animation: wash 2.4s var(--ease-both) infinite;
+}
+@keyframes wash { 50% { opacity: 0.05; } }
+
+.sheet {
+  width: 100%; max-width: var(--shell); margin: auto auto 0;
+  max-height: 86dvh; padding: 0; border: 0;
+  border-radius: var(--r-5) var(--r-5) 0 0;
+  background: var(--bg-overlay); color: var(--text-1);
+  box-shadow: var(--e-4); display: flex; flex-direction: column;
+}
+.sheet::backdrop { background: var(--scrim); }
+.sheet__grab {
+  width: 40px; height: 4px; border-radius: 2px; background: var(--line-strong);
+  margin: var(--sp-3) auto var(--sp-1); flex: 0 0 auto;
+}
+.sheet__hd {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-bottom: var(--hair) solid var(--line); flex: 0 0 auto;
+}
+.sheet__bd {
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--sp-4) var(--sp-4) max(var(--sp-6), env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: var(--sp-4);
+}
+
+/* ---------------------------------------------------------------- inputs -- */
+.field { display: flex; flex-direction: column; gap: var(--sp-2); }
+.input {
+  width: 100%; min-height: var(--tap-lg); padding: 0 var(--sp-4);
+  border: 0; border-radius: var(--r-3);
+  background: var(--bg-inset); color: var(--text-1);
+  box-shadow: var(--deboss), inset 0 0 0 var(--hair) var(--line-2);
+}
+/* One input, not four boxes: four boxes break paste, confuse screen readers,
+   and misbehave with Android IME. */
+.input--code {
+  text-transform: uppercase; letter-spacing: 0.35em; text-indent: 0.35em;
+  font-family: var(--font-mono); font-size: 2rem; font-weight: 700;
+  text-align: center; min-height: 72px;
+}
+.input--code::placeholder { letter-spacing: 0.35em; color: var(--text-off); }
+
+/* ----------------------------------------------------------------- games -- */
+.gamegrid { display: flex; flex-direction: column; gap: var(--sp-3); }
+.gametile {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-4); border-radius: var(--r-4); text-align: left; width: 100%;
+  background: var(--card-stock);
+  box-shadow: var(--e-2), inset 0 0 0 var(--hair) var(--line-2);
+  transition: transform var(--d-1) var(--ease-out), box-shadow var(--d-2) var(--ease-out);
+}
+.gametile:active { transform: translateY(1px) scale(0.99); box-shadow: var(--press); }
+.gametile.is-selected { box-shadow: var(--e-2), inset 0 0 0 2px var(--game-accent); }
+.gametile__emblem { width: 44px; height: 44px; flex: 0 0 auto; color: var(--game-accent); }
+.gametile__name { font-size: var(--t-lg); font-weight: 700; line-height: 1.15; }
+.gametile__meta { font-size: var(--t-xs); color: var(--text-3); }
+
+.secret {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-5) var(--sp-4); border-radius: var(--r-4);
+  background: var(--bg-inset); box-shadow: var(--deboss);
+  text-align: center;
+}
+.secret__value { font-size: var(--t-2xl); font-weight: 800; line-height: 1.05; color: var(--game-accent); }
+
+.optionrow {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  min-height: var(--tap); padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-3); background: var(--bg-raised);
+  box-shadow: inset 0 0 0 var(--hair) var(--line);
+}
+.seg { display: flex; gap: 2px; padding: 3px; border-radius: var(--r-pill); background: var(--bg-inset); }
+.seg button {
+  min-height: 38px; padding: 0 var(--sp-3); border-radius: var(--r-pill);
+  font-size: var(--t-xs); font-weight: 700; color: var(--text-2);
+}
+.seg button[aria-pressed='true'] { background: var(--bg-hover); color: var(--text-1); box-shadow: var(--e-1); }
+
+/* ------------------------------------------------------------ reveal log -- */
+.log { display: flex; flex-direction: column; gap: var(--sp-2); }
+.log li {
+  display: flex; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-2); background: var(--bg-raised); font-size: var(--t-sm);
+}
+.log li b { color: var(--text-1); }
+
+/* --------------------------------------------------------- celebration --- */
+/* 24 particles, two nested transforms so they arc under gravity. Outer drifts
+   on X linearly, inner falls on Y with ease-in. Compositor-only. */
+.burst { position: fixed; left: 50%; top: 32%; width: 0; height: 0; z-index: 70; pointer-events: none; }
+.burst span { position: absolute; left: 0; top: 0; animation: bx 1400ms cubic-bezier(0.15, 0.6, 0.4, 1) forwards; }
+.burst i {
+  display: block; width: 9px; height: 14px; margin: -7px 0 0 -4px;
+  background: var(--c, var(--game-accent)); border-radius: 1px;
+  animation: by 1400ms cubic-bezier(0.35, 0, 0.9, 0.75) forwards;
+}
+@keyframes bx { to { transform: translateX(var(--x)); } }
+@keyframes by {
+  0% { transform: translateY(var(--y0)) rotate(0) scale(0); opacity: 0; }
+  9% { opacity: 1; transform: translateY(calc(var(--y0) * 0.7)) rotate(40deg) scale(1); }
+  100% { transform: translateY(62vh) rotate(var(--r)) scale(0.85); opacity: 0; }
+}
+.burst span:nth-child(6n + 1) i { --c: var(--game-accent); }
+.burst span:nth-child(6n + 2) i { --c: var(--team-1); border-radius: 50%; }
+.burst span:nth-child(6n + 3) i { --c: var(--team-3); width: 6px; height: 6px; }
+.burst span:nth-child(6n + 4) i { --c: var(--text-1); height: 3px; width: 16px; }
+.burst span:nth-child(6n + 5) i { --c: var(--team-5); border-radius: 50% 50% 0 0; }
+.burst span:nth-child(6n) i { --c: var(--team-6); width: 5px; height: 18px; }
+
+/* ------------------------------------------------------- reduced motion --- */
+/* Every animation here is REDUNDANT with a static cue, so removing motion
+   never removes information. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .rolecard__inner { transform: none !important; }
+  .rolecard__face { transition: opacity 140ms linear !important; }
+  .rolecard__back { opacity: 1; }
+  .rolecard.is-revealed .rolecard__back,
+  .rolecard__btn:active .rolecard__back { opacity: 0; }
+  .rolecard__front { transform: none !important; }
+  .timer.is-urgent::after { display: none; }
+  .timer.is-urgent .timer__n { text-decoration: underline; text-decoration-thickness: 3px; }
+  .turnwash { animation: none; opacity: 0.14; }
+  .pill i { animation: none !important; }
+  .burst { display: none; }
+}

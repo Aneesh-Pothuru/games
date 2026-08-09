@@ -473,6 +473,40 @@ describe('the table waits for you to read the feedback', () => {
     assert.equal(g.lab.awaiting, null);
   });
 
+  test('being on the clock again does not cancel the hold', () => {
+    // The case CI found. If your action closes the betting round and you are
+    // first to act on the next street, you become the actor again instantly.
+    // The hold must survive that: the screen has to keep showing the feedback
+    // the "Got it" button refers to, and must not caption the NEW decision
+    // with the old spot's numbers.
+    let found = false;
+    for (let seed = 1; seed < 200 && !found; seed++) {
+      const room = makeRoom();
+      const g = lab.start(room, seed, 1000);
+      let now = 1000;
+      for (let i = 0; i < 80 && g.seats[g.actor]?.id !== HUMAN; i++) {
+        now += 10;
+        lab.onDeadline(room, now);
+      }
+      if (g.seats[g.actor]?.id !== HUMAN) continue;
+      const view = lab.viewFor(room, HUMAN);
+      lab.action(room, HUMAN, { type: 'act', ...passive(view) }, now + 10);
+
+      if (!g.lab.awaiting || g.phase !== 'hand') continue;
+      if (g.seats[g.actor]?.id !== HUMAN) continue; // not the case we are after
+
+      found = true;
+      const held = lab.viewFor(room, HUMAN);
+      assert.ok(held.awaiting, 'the hold was dropped the moment you were on the clock again');
+      assert.ok(held.lastGrade, 'held with no feedback to read');
+      assert.equal(held.advice, null,
+        'the next decision was captioned while you were still held on the last one');
+    }
+    // Not every seeding produces the case; if none did, the test is inert
+    // rather than passing for the wrong reason.
+    assert.ok(found, 'no seed produced an act-again-immediately spot');
+  });
+
   test('never pausing means it never holds', () => {
     const room = actOnce(makeRoom({ config: { pause: 'never' } }));
     assert.equal(room.game.lab.awaiting, null);

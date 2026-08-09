@@ -466,7 +466,12 @@ export function viewFor(room, viewerId) {
     // real table is absent of them. What you do get is the name of the idea
     // the spot is testing, which is the "where am I going" half of feedback
     // and costs nothing pedagogically because it does not contain the answer.
-    advice: g.actor >= 0 && g.seats[g.actor]?.id === viewerId
+    // Nothing about the NEXT decision while you are still being held on the
+    // last one. When your action closes a betting round you can be on the
+    // clock again instantly, and `lab.advice` still describes the spot you
+    // just played — sending it would caption the new decision with the old
+    // one's numbers.
+    advice: !lab.awaiting && g.actor >= 0 && g.seats[g.actor]?.id === viewerId
       ? forMode(lab.advice, room.config.coach)
       : null,
     coach: room.config.coach,

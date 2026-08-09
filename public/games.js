@@ -2164,7 +2164,12 @@ const pokerlab = {
   body(ctx) {
     const v = ctx.view;
     if (!v) return [waiting('Shuffling…')];
-    const deciding = v.myTurn && v.phase === 'hand';
+    // Held counts as not-deciding, however the seats fell. If your action
+    // completes the betting round and you are first to act on the next street,
+    // you become the actor again immediately — and without this the screen
+    // swapped to the NEXT decision while still holding you on the last one's
+    // feedback, so the thing the "Got it" button referred to was not on screen.
+    const deciding = v.myTurn && v.phase === 'hand' && !v.awaiting;
 
     return [
       progressStrip(v),

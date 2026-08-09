@@ -1,14 +1,10 @@
 /** Play a full Nightfall round through the real UI on phones. */
-import { chromium, devices } from 'playwright';
-import { existsSync } from 'node:fs';
+import { devices } from 'playwright';
+import { BASE, launchBrowser } from './launch.mjs';
 
-// Prefer an explicit path, then this image's preinstalled browser, then let
-// Playwright resolve its own download (which is what CI does).
-const BUNDLED = '/opt/pw-browsers/chromium';
-const EXECUTABLE = process.env.CHROMIUM_PATH || (existsSync(BUNDLED) ? BUNDLED : undefined);
 const OUT = process.env.SHOT_DIR ?? '/tmp/parlour-shots';
 await import('node:fs').then((fs) => fs.mkdirSync(OUT, { recursive: true }));
-const b = await chromium.launch({ executablePath: EXECUTABLE });
+const b = await launchBrowser();
 let fail = 0;
 const check=(n,c,x='')=>{console.log(`${c?'ok  ':'FAIL'} ${n}${c?'':' -- '+x}`); if(!c) fail++;};
 

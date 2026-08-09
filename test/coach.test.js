@@ -77,6 +77,31 @@ describe('what the coach reports', () => {
     assert.match(fold.why, /zero/i);
   });
 
+  test('folding is not offered at all when checking is free', () => {
+    // The one strictly dominated action in poker. Listing it at 0.00bb also
+    // put it inside the indifference band of any marginal check, which had the
+    // coach announce "check or fold — same value" in the big blind. They are
+    // not the same value: one of them is never right.
+    for (const board of [[], C('Qh 7d 2c'), C('Qh 7d 2c 9s'), C('Qh 7d 2c 9s 4h')]) {
+      const a = analyse(spot({
+        board,
+        street: ['preflop', 'flop', 'turn', 'river'][Math.max(0, board.length - 2)],
+        toCall: 0,
+        canCheck: true,
+      }));
+      assert.equal(a.options.find((o) => o.move === 'fold'), undefined,
+        `fold offered with a free check on ${board.length} cards`);
+      assert.ok(a.options.some((o) => o.move === 'check'));
+      assert.notEqual(a.best.move, 'fold');
+      assert.ok(!a.mixed?.includes('fold'), 'and it is never called an equal alternative');
+    }
+  });
+
+  test('but it is offered the moment there is something to call', () => {
+    const a = analyse(spot({ toCall: 100, canCheck: false }));
+    assert.ok(a.options.some((o) => o.move === 'fold'));
+  });
+
   test('postflop equity is exact and labelled as exact', () => {
     // The engine enumerates every runout postflop, so there is no error bar to
     // report and the coach must not invent one.

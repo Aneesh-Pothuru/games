@@ -255,10 +255,18 @@ function preflopOptions(spot, { eq, bb, realisation }) {
   const realised = realisedEquity(eq.equity, realisation);
 
   const out = [];
-  out.push({
-    move: 'fold', ev: 0,
-    why: 'Folding is always exactly zero. Money already in the pot is not yours.',
-  });
+  // Folding is only a decision when there is something to call. Checking is
+  // free, so folding instead of checking is the one strictly dominated action
+  // in poker — and listing it as an option at 0.00bb put it inside the
+  // indifference band of a marginal check, which had the coach announce
+  // "check or fold — same value" in the big blind. They are not the same
+  // value; one of them is never right.
+  if (toCall > 0) {
+    out.push({
+      move: 'fold', ev: 0,
+      why: 'Folding is always exactly zero. Money already in the pot is not yours.',
+    });
+  }
 
   if (toCall > 0) {
     const evCall = bb(evOfCall(toCall, pot, realised));
@@ -351,7 +359,12 @@ function postflopOptions(spot, { eq, realised, outs, required, realisation, bb, 
   const effective = realised;
   const out = [];
 
-  out.push({ move: 'fold', ev: 0, why: 'Folding is exactly zero, always.' });
+  // Same rule as preflop: with a free check available, folding is not a line,
+  // it is a mistake, and offering it at 0.00bb makes it tie with any check
+  // worth less than the indifference band.
+  if (toCall > 0) {
+    out.push({ move: 'fold', ev: 0, why: 'Folding is exactly zero, always.' });
+  }
 
   if (canCheck) {
     out.push({

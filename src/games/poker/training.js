@@ -23,7 +23,8 @@ import { makeRng, randInt, shuffle } from '../../shared/rng.js';
 import { clampInt, oneOf } from '../engine.js';
 import * as holdem from './index.js';
 import { PERSONALITIES, PERSONALITY_IDS, applyResult, decide, makeBot } from './bots.js';
-import { analyse, emptyScorecard, grade, record, summarise } from './coach.js';
+import { analyse, emptyScorecard, grade, qualityOf, record, summarise } from './coach.js';
+import { emptyMastery, progress, recordMastery } from './concepts.js';
 import { POSITIONS } from './ranges.js';
 
 export const meta = {
@@ -99,6 +100,10 @@ export function start(room, seed, now) {
     bots: Object.fromEntries(bots.map((b, i) => [b.id, makeBot(b.id, b.personality, (seed ^ (i * 2654435761)) >>> 0)])),
     humanIds: humans.map((p) => p.id),
     scorecards: Object.fromEntries(humans.map((p) => [p.id, emptyScorecard()])),
+    // What each student has actually learned, per named concept, rather than
+    // one undifferentiated "you lose 8bb/100". A score you cannot act on is
+    // not feedback.
+    mastery: Object.fromEntries(humans.map((p) => [p.id, emptyMastery()])),
     advice: null,
     lastGrade: null,
     // Held back until the hand is over, so the runout never colours the grade.
@@ -211,6 +216,13 @@ export function action(room, playerId, act, now) {
     if (g.lab.advice) {
       graded = grade(g.lab.advice, { move: act.move, to: act.to });
       record(g.lab.scorecards[playerId] ?? emptyScorecard(), graded);
+      // Credit the concept the spot was actually teaching. The lesson is
+      // chosen from the spot, not from what the player did, so a fold and a
+      // call in the same spot advance the same idea — one of them further.
+      const learning = g.lab.mastery[playerId];
+      if (learning && g.lab.advice.lesson) {
+        recordMastery(learning, g.lab.advice.lesson.id, qualityOf(graded));
+      }
     }
 
     const outcome = holdem.action(room, playerId, act, now);
@@ -334,6 +346,7 @@ export function viewFor(room, viewerId) {
     lastGrade: lab.lastGrade,
     revealed: lab.revealBots,
     scorecard: summarise(lab.scorecards[viewerId] ?? emptyScorecard()),
+    course: progress(lab.mastery?.[viewerId] ?? emptyMastery()),
     myStack: me?.stack ?? 0,
   };
 }

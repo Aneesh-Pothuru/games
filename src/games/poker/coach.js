@@ -24,6 +24,7 @@ import { CATEGORY, categoryOf, describe, evaluate } from './cards.js';
 import { equityVsRange, outsFor } from './equity.js';
 import { classOf } from './notation.js';
 import { rangeByWidth } from './bots.js';
+import { conceptsFor } from './concepts.js';
 import { LEAKS, POSITION_NAME, RFI, preflopPlan } from './ranges.js';
 import {
   alpha, commitmentAdvice, equityForNextCard, equityFromOuts, evOfCall,
@@ -200,11 +201,15 @@ export function analyse(spot) {
   const best = options[0];
   const mixed = options.filter((o) => best.ev - o.ev <= INDIFFERENT_BB);
 
-  return {
+  const analysis = {
     street,
     hand: {
       class: classOf(hole[0], hole[1]),
       made: board.length >= 3 ? describe([...hole, ...board]) : null,
+      // The category as a number as well as a name: "Two pair, sixes and
+      // fours" is for the player, and the ordinal is what lets the syllabus
+      // ask questions like "is this a bluff-catcher".
+      madeCategory: madeCat,
       draws: outs?.draws ?? [],
     },
     position: POSITION_NAME[position] ?? position,
@@ -223,6 +228,124 @@ export function analyse(spot) {
     mixed: mixed.length > 1 ? mixed.map((o) => o.move) : null,
     opponents,
   };
+
+  // The lesson is attached LAST, because it reads the finished analysis. This
+  // is the part that turns a readout into teaching: one named idea, the one
+  // number that expresses it here, and what that number means in words.
+  const ranked = conceptsFor(spot, analysis);
+  analysis.concepts = ranked.map((r) => r.concept.id);
+  analysis.lesson = ranked.length ? lessonFor(ranked[0].concept, spot, analysis) : null;
+  return analysis;
+}
+
+/**
+ * One concept, grounded in this exact spot.
+ *
+ * The generic statement of an idea is forgettable; the same idea with your
+ * cards and your price in it is not. So every lesson carries both — `idea` is
+ * the transferable sentence and `point` is what it means right now.
+ */
+function lessonFor(concept, spot, a) {
+  return {
+    id: concept.id,
+    name: concept.name,
+    stage: concept.stage,
+    idea: concept.idea,
+    rule: concept.rule,
+    why: concept.why,
+    trap: concept.trap,
+    // The headline: one number, and what it is telling you.
+    metric: metricFor(concept, spot, a),
+    point: pointFor(concept, spot, a),
+  };
+}
+
+/** The single number this concept is about, in this spot. */
+function metricFor(concept, spot, a) {
+  const pct = (x) => `${(x * 100).toFixed(0)}%`;
+  switch (concept.id) {
+    case 'potOdds':
+    case 'mdf':
+    case 'bluffCatching':
+      return { value: pct(a.required), label: 'you need', exact: true };
+    case 'outs':
+    case 'oneCard':
+    case 'impliedOdds':
+      return { value: `${a.outs?.strongOuts ?? 0}`, label: 'outs', exact: true };
+    case 'spr':
+      return { value: Number.isFinite(a.spr) ? a.spr.toFixed(1) : '—', label: 'SPR', exact: true };
+    case 'position':
+    case 'realisation':
+      return { value: pct(Math.max(0, Math.min(1, a.equity.equity * 1))), label: 'raw equity', exact: a.equity.exact };
+    case 'foldEquity':
+      return { value: pct(alpha(spot.toCall > 0 ? spot.toCall : Math.round(spot.pot * 0.66), Math.max(1, spot.pot - spot.toCall))), label: 'must work', exact: true };
+    default:
+      return { value: pct(a.equity.equity), label: 'your equity', exact: a.equity.exact };
+  }
+}
+
+/** What that number means, here, in one sentence a person would say out loud. */
+function pointFor(concept, spot, a) {
+  const pct = (x) => `${(x * 100).toFixed(0)}%`;
+  const eq = a.equity.equity;
+  const outs = a.outs?.strongOuts ?? 0;
+  const oneCard = outs / (spot.board.length === 4 ? 46 : 47);
+
+  switch (concept.id) {
+    case 'potOdds':
+      return `Calling ${Math.round(spot.toCall)} into ${Math.round(spot.pot)} means you need to win ${pct(a.required)} of the time. `
+        + `You win ${pct(eq)}, so this call ${eq > a.required ? 'makes money' : 'loses money'}.`;
+    case 'outs':
+    case 'oneCard':
+      return `${outs} cards make your hand. That is ${outs}/${spot.board.length === 4 ? 46 : 47} = ${pct(oneCard)} for the next card, `
+        + `against the ${pct(a.required)} you need — ${oneCard > a.required ? 'enough' : 'not enough on price alone'}.`;
+    case 'impliedOdds':
+      return `${pct(oneCard)} does not cover the ${pct(a.required)} you need right now. This call is only right if hitting it `
+        + 'wins you enough on later streets to make up the difference.';
+    case 'mdf':
+      return `Their bet needs to work ${pct(alpha(spot.toCall, Math.max(1, spot.pot - spot.toCall)))} of the time to break even, `
+        + `so you have to continue with about ${pct(mdf(spot.toCall, Math.max(1, spot.pot - spot.toCall)))} of your range — not of this hand.`;
+    case 'bluffCatching':
+      return `You beat every bluff and lose to every value bet, so how good your hand looks does not matter. `
+        + `You need ${pct(a.required)}, which is the share of their betting range that is bluffing.`;
+    case 'position':
+      return a.realisation < 1
+        ? `Out of position you collect about ${pct(a.realisation)} of your equity, so ${pct(eq)} plays like ${pct(Math.max(0, Math.min(1, a.equity.equity * a.realisation)))}.`
+        : `Acting last, you collect more than your share — ${pct(eq)} plays like more than that because you control the pot.`;
+    case 'realisation':
+      return `${pct(eq)} raw is not what you collect. Out of position, treat it as the lower number and fold the spots that are close.`;
+    case 'openingRanges':
+      return `From ${a.position} the standard opening range is about ${pct(openWidth(spot.position))} of hands. `
+        + `${a.hand.class} is ${a.best.move === 'raise' ? 'inside it' : 'outside it'}.`;
+    case 'blindDefence':
+      return `You are already in for a blind and the price is ${pct(a.required)}, which almost any two cards beat on raw equity. `
+        + 'What decides it is that you play the rest of the hand out of position.';
+    case 'domination':
+      return `${a.hand.class} makes top pair often and is beaten by every hand that calls a raise with the same top card. `
+        + 'It wins small pots and loses big ones.';
+    case 'valueBetting':
+      return `You are ahead of ${pct(eq)} of what they can hold. Name a worse hand that calls — if you can, bet it.`;
+    case 'showdownValue':
+      return `${pct(eq)} wins often enough to see a showdown and not often enough to bet. Betting folds out the hands you beat.`;
+    case 'semiBluff':
+      return `${outs} outs is ${pct(oneCard)} to improve, and betting adds the times they simply fold. `
+        + 'That second way of winning is why this is a bet rather than a call.';
+    case 'foldEquity':
+      return 'With little equity, a bet only makes money when they fold. Work out how often it has to work before you make it.';
+    case 'boardTexture':
+      return spot.board.length >= 3
+        ? 'Ask how many of their hands this flop helps. The fewer it helps, the smaller the bet that does the job.'
+        : '';
+    case 'spr':
+      return `${Number.isFinite(a.spr) ? a.spr.toFixed(1) : '—'} pots left behind. ${commitmentAdvice(a.spr).text}`;
+    default:
+      return `You win ${pct(eq)} against the hands they can actually have here.`;
+  }
+}
+
+/** Standard opening width by seat, for the lesson text to quote. */
+function openWidth(position) {
+  return { UTG: 0.17, HJ: 0.214, CO: 0.278, BTN: 0.433, SB: 0.409 }[position] ?? 0.25;
 }
 
 /**
@@ -242,7 +365,7 @@ export function analyse(spot) {
  */
 function preflopOptions(spot, { eq, bb, realisation }) {
   const {
-    hole, position, toCall, canRaise, minRaiseTo, maxRaiseTo, bigBlind, pot,
+    hole, position, toCall, canCheck, canRaise, minRaiseTo, maxRaiseTo, bigBlind, pot,
     opponents = 1,
   } = spot;
   const cls = classOf(hole[0], hole[1]);
@@ -281,7 +404,10 @@ function preflopOptions(spot, { eq, bb, realisation }) {
             + `${(realised * 100).toFixed(1)}% effective. ${cls} is outside the chart here.`
           : `${cls} is outside the chart here.`,
     });
-  } else {
+  } else if (canCheck) {
+    // Guarded on canCheck rather than on toCall alone: they are the same thing
+    // at a real table, but an engine that ever disagrees would have the coach
+    // recommend an action the server would reject.
     out.push({
       move: 'check',
       ev: 0.02,
@@ -448,6 +574,21 @@ export function grade(analysis, taken) {
         : `${analysis.best.move} is better by ${loss.toFixed(2)}bb. ${analysis.best.why}`,
     leak: chosen.leak ?? null,
   };
+}
+
+/**
+ * A graded decision as a mastery signal in 0..1.
+ *
+ * Not the raw EV loss. Mastery is a claim about whether you understand an
+ * idea, and understanding is not linear in big blinds: the gap between losing
+ * 0.02bb and 0.2bb is the difference between right and slightly loose, while
+ * the gap between 2bb and 20bb is the difference between wrong and wrong. So
+ * this maps the grade BANDS onto a scale, which is the same reason chess
+ * grades a move by its win-probability drop rather than by centipawns.
+ */
+export function qualityOf(graded) {
+  if (graded.indifferent) return 1;
+  return { solid: 1, loose: 0.7, mistake: 0.3, blunder: 0 }[graded.grade] ?? 0;
 }
 
 /**

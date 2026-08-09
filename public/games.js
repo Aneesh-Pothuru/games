@@ -1921,4 +1921,157 @@ const cheat = {
   ],
 };
 
-export const GAME_UI = { council, oddoneout, sabotage, spectrum, nightfall, holdem, cheat };
+
+// ---------------------------------------------------------------- pokerlab --
+
+/**
+ * The coach panel.
+ *
+ * Two rules it never breaks. Estimates are labelled as estimates — equity
+ * carries its error bar and pot odds do not, because one is a sample and the
+ * other is arithmetic. And when two lines are worth the same it says so
+ * instead of picking one, because inventing a winner teaches a certainty the
+ * maths does not support.
+ */
+function coachPanel(ctx, a) {
+  if (!a) return null;
+  const best = a.best;
+  return el('details', { class: 'coach', open: true }, [
+    el('summary', { class: 'coach__head' }, [
+      el('span', { class: 'label', text: 'Coach' }),
+      el('b', {
+        class: 'coach__call',
+        text: a.mixed
+          ? `${a.mixed.join(' or ')} — same value`
+          : `${best.move}${best.to ? ` to ${chips(best.to)}` : ''}`,
+      }),
+    ]),
+    el('div', { class: 'coach__body' }, [
+      el('div', { class: 'coach__grid' }, a.facts.map((f) => el('div', { class: 'coach__fact' }, [
+        el('span', { class: 'label', text: f.label }),
+        el('b', { class: `coach__val ${f.exact ? '' : 'is-estimate'}`, text: f.value }),
+        el('span', { class: 'dim t-2xs', text: f.detail }),
+      ]))),
+      ...a.warnings.map((w) => el('div', { class: 'banner banner--danger t-xs', text: w })),
+      el('div', { class: 'label', text: 'What each line is worth' }),
+      el('ul', { class: 'coach__opts' }, a.options.map((o) => el('li', {
+        class: `coach__opt ${o.move === best.move ? 'is-best' : ''}`,
+      }, [
+        el('b', { text: `${o.move}${o.to ? ` ${chips(o.to)}` : ''}` }),
+        el('span', { class: 'coach__ev num', text: `${o.ev >= 0 ? '+' : ''}${o.ev.toFixed(2)}bb` }),
+        el('span', { class: 'dim t-2xs', text: o.why }),
+      ]))),
+    ]),
+  ]);
+}
+
+function gradeBanner(g) {
+  if (!g) return null;
+  const tone = g.grade === 'solid' ? 'banner--good'
+    : g.grade === 'blunder' ? 'banner--danger' : '';
+  return el('div', { class: `banner ${tone} stack stack--tight` }, [
+    el('b', { text: g.indifferent ? 'Either was fine' : `${g.label}${g.evLoss > 0.005 ? ` — ${g.evLoss.toFixed(2)}bb` : ''}` }),
+    el('span', { class: 'dim t-sm', text: g.why }),
+  ]);
+}
+
+/**
+ * The running score.
+ *
+ * Under twenty decisions this shows the running TOTAL, not the per-100 rate.
+ * One blunder in your first five decisions extrapolates to "87bb lost per
+ * 100", which is a statement about arithmetic rather than about your poker,
+ * and a student who sees it either panics or stops believing the number.
+ */
+function scoreStrip(s) {
+  if (!s || !s.decisions) return null;
+  return el('div', { class: 'row' }, [
+    el('span', { class: 'label grow', text: `${s.decisions} decision${s.decisions === 1 ? '' : 's'}` }),
+    el('span', {
+      class: 'label',
+      text: s.rateable
+        ? `${s.evLossPer100.toFixed(1)}bb lost / 100`
+        : `${s.evLoss.toFixed(2)}bb lost so far`,
+    }),
+  ]);
+}
+
+const pokerlab = {
+  roleChip: (ctx) => holdem.roleChip(ctx),
+
+  body(ctx) {
+    const v = ctx.view;
+    if (!v) return [waiting('Shuffling…')];
+
+    const seatList = el('ul', { class: 'plist' }, v.seats.map((s) => {
+      const p = ctx.room.players.find((x) => x.id === s.id) ?? { id: s.id, name: 'Player', online: true };
+      const bits = [chips(s.stack)];
+      if (s.lastAction) bits.push(actionLabel(s));
+      if (s.handName) bits.push(s.handName);
+      return ctx.playerTile(ctx, p, {
+        sub: bits.join(' · '),
+        state: s.folded && s.inHand ? 'FOLDED' : s.allIn ? 'ALL IN' : s.acting ? 'TO ACT' : undefined,
+        badges: [
+          s.isButton && el('span', { class: 'bdg bdg--btn', title: 'Dealer' }, ['D']),
+          s.hole && s.id !== ctx.me && el('span', { class: 'pokerpeek' }, s.hole.map((c) => playingCard(c, { size: 'xs' }))),
+        ].filter(Boolean),
+      });
+    }));
+
+    return [
+      scoreStrip(v.scorecard),
+      potStrip(v),
+      boardRow(ctx, v),
+      v.phase === 'handover' && handoverBanner(ctx, v),
+      gradeBanner(v.lastGrade),
+      myCards(ctx, v),
+      v.advice && coachPanel(ctx, v.advice),
+      seatList,
+      // Each seat's habit is printed on it. The point is not to hide the
+      // opponent's strategy — it is to teach you to punish it.
+      v.phase !== 'hand' && el('details', { class: 'card' }, [
+        el('summary', { class: 'label', text: 'Who you are playing' }),
+        el('ul', { class: 'log', style: 'margin-top:var(--sp-3)' }, v.seats.filter((s) => s.tell).map((s) =>
+          el('li', {}, [el('b', { text: ctx.nameOf(ctx, s.id) }), el('span', { text: s.tell })]))),
+      ]),
+    ].filter(Boolean);
+  },
+
+  bottom(ctx) {
+    const v = ctx.view;
+    if (!v) return bottom([]);
+    if (v.phase === 'over') return playAgainBar(ctx);
+    if (v.phase === 'handover') {
+      return bottom([
+        !v.revealed && el('button', {
+          class: 'btn btn--secondary btn--block',
+          onclick: () => ctx.send({ type: 'reveal' }),
+        }, ['Show me what they had']),
+        primary('Next hand', { onclick: () => ctx.send({ type: 'deal' }) }),
+      ].filter(Boolean));
+    }
+    if (!v.myTurn) return waitingBar(v.actor ? `${ctx.nameOf(ctx, v.actor)} is thinking…` : 'Dealing…');
+    return holdem.bottom(ctx);
+  },
+
+  options: (ctx, set) => [
+    el('div', { class: 'optionrow' }, [
+      el('span', { text: 'Table' }),
+      el('div', { class: 'seg' }, [['mixed', 'Mixed'], ['loose', 'Loose'], ['tough', 'Tough']].map(([val, l]) =>
+        el('button', {
+          'aria-pressed': String(ctx.room.config.table === val),
+          onclick: () => set({ table: val }),
+        }, [l]))),
+    ]),
+    el('div', { class: 'optionrow' }, [
+      el('span', { text: 'Coach' }),
+      el('div', { class: 'seg' }, [['full', 'On'], ['quiet', 'Off']].map(([val, l]) =>
+        el('button', {
+          'aria-pressed': String(ctx.room.config.coach === val),
+          onclick: () => set({ coach: val }),
+        }, [l]))),
+    ]),
+  ],
+};
+
+export const GAME_UI = { council, oddoneout, sabotage, spectrum, nightfall, holdem, cheat, pokerlab };

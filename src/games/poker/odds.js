@@ -30,6 +30,69 @@ export function potOdds(callAmount, potAfterBet) {
 }
 
 /**
+ * Facing a RAISE, which is not the same shape and is routinely computed wrong.
+ *
+ * You bet B into P0, villain raises TO R, and you call R - B — your own bet is
+ * already dead money and is not part of the call.
+ *
+ *   required = (R - B) / (P0 + 2R)
+ *
+ * Treating the raise size as the call amount reports 60% where the answer is
+ * 25%. Cheap raises are much cheaper to call than they look.
+ */
+export function requiredEquityVsRaise(potBeforeYourBet, yourBet, raiseTo) {
+  const call = raiseTo - yourBet;
+  const facing = potBeforeYourBet + yourBet + raiseTo;
+  return requiredEquity(call, facing);
+}
+
+/**
+ * The share of a betting range that should be bluffs, at a given size.
+ *
+ *   bluffShare = b / (1 + 2b)      for b = bet / pot
+ *
+ * This is NOT alpha. Alpha is how often a bluff must SUCCEED (50% at pot);
+ * the bluff share of the range is a different number (33.3% at pot). Using
+ * alpha here builds a range roughly half again too bluff-heavy at every size,
+ * and the two are easy to confuse because both are "the bluffing number".
+ */
+export function bluffShareOfRange(betSize, potBeforeBet) {
+  const b = potBeforeBet > 0 ? betSize / potBeforeBet : 0;
+  return b / (1 + 2 * b);
+}
+
+/**
+ * The bet size that the combos you actually hold can support.
+ *
+ *   b* = bluffs / (value - bluffs)
+ *
+ * Inverting the balance condition rather than picking a size and hoping. With
+ * 12 value combos and 4 bluffs you can bet half pot; with 6 value and 12
+ * bluffs no size is defensible and you should be checking.
+ */
+export function sizeForCombos(valueCombos, bluffCombos) {
+  if (valueCombos <= bluffCombos) return null;
+  return bluffCombos / (valueCombos - bluffCombos);
+}
+
+/**
+ * The equity needed to call an all-in at a given SPR, since shoving at SPR s
+ * IS betting s times the pot.
+ *
+ *   required = SPR / (1 + 2 * SPR)
+ *
+ * Note where this asymptotes: 50%, and it barely moves from SPR 6 (46.2%) to
+ * SPR 20 (48.8%). Pot odds are therefore NOT the reason deep stacks demand
+ * stronger hands — the reason is that only very strong hands are willing to
+ * put a deep stack in, so the range you are called by tightens far faster than
+ * the price loosens. An engine that compares raw equity to this number will
+ * happily stack you into a set.
+ */
+export function requiredEquityAtSpr(sprValue) {
+  return sprValue / (1 + 2 * sprValue);
+}
+
+/**
  * Minimum defence frequency: the share of your range you must continue with
  * so that a bet of this size cannot profit by auto-bluffing.
  *
@@ -103,6 +166,29 @@ export function equityFromOuts(outs, street) {
 }
 
 /**
+ * The equity a draw has for the card it is actually buying.
+ *
+ * This is the correction that matters most in the most common spot in poker.
+ * Calling a flop bet buys ONE card — you have to pay again on the turn to see
+ * the river — so the number to compare against pot odds is o/47, not the
+ * two-card figure.
+ *
+ * A nine-out flush draw facing half pot: two-card equity is 34.97% against a
+ * 25% price and looks like a comfortable call. One-card equity is 19.15% and
+ * is a fold by nearly six points. The call is usually still right, but because
+ * of implied odds and the option to raise later — not because 35% beats 25%.
+ * Quoting the two-card number against a bet that is not all-in is the single
+ * most expensive habit a naive odds display can teach.
+ *
+ * The two-card figure is correct only when you are all-in, or certain to see
+ * both cards for free.
+ */
+export function equityForNextCard(outs, street) {
+  if (outs <= 0) return 0;
+  return Math.min(1, outs / (street === 'turn' ? 46 : 47));
+}
+
+/**
  * The rule of 2 and 4, and how wrong it is.
  *
  * The shortcut over-estimates, and the error grows with the out count: at 9
@@ -129,6 +215,71 @@ export function impliedOddsNeeded(callAmount, potAfterBet, equity) {
   const direct = equity * (potAfterBet + callAmount) - callAmount;
   if (direct >= 0) return 0;
   return -direct / equity;
+}
+
+/**
+ * Required equity once the money you expect to LOSE on later streets is
+ * counted too.
+ *
+ *   required = (call + lose) / (pot + win + call + lose)
+ *
+ * With win and lose both zero this collapses to plain pot odds, which is why
+ * it is the only formula the engine really needs. The reverse term is violent:
+ * an expected further loss equal to the call pushes a 33% requirement to 50%.
+ * That is what makes second pair a fold against a big turn bet even when the
+ * immediate price looks fine.
+ */
+export function requiredEquityWithImplied(callAmount, potAfterBet, winLater = 0, loseLater = 0) {
+  const risk = callAmount + loseLater;
+  const reward = potAfterBet + winLater;
+  return requiredEquity(risk, reward);
+}
+
+/**
+ * Equity realisation. Raw equity assumes the hand gets checked down, which
+ * never happens.
+ *
+ * In position you see every action before committing, can take free cards and
+ * can control the final pot, so you realise MORE than raw equity — typically
+ * 1.10 to 1.20. Out of position it is 0.75 to 0.90. Suitedness adds roughly
+ * another 0.08, and most of that is not the extra raw equity: it is that the
+ * equity a suited hand flops is NUTTED, which is the profile that gets paid.
+ *
+ * Nutted draws over-realise (a combo draw can reach 1.4); capped medium made
+ * hands under-realise (0.75 is common) because they cannot call three streets.
+ */
+export function realisationFactor({ inPosition, suited = false, nutted = false, capped = false }) {
+  let r = inPosition ? 1.15 : 0.82;
+  if (suited) r += 0.08;
+  if (nutted) r += 0.2;
+  if (capped) r -= 0.1;
+  return Math.max(0.5, Math.min(1.6, r));
+}
+
+/**
+ * Apply a realisation factor to raw equity.
+ *
+ * NOT a multiplication, which is the obvious thing to write and is wrong at
+ * both ends. Multiplying 70% by 1.23 claims 86% — but position cannot conjure
+ * sixteen points out of a hand that is already well ahead, and multiplying 95%
+ * by the same factor claims 117%, which is not a probability at all. The same
+ * error runs the other way: a 3% hand does not lose a fifth of its equity to
+ * being out of position, because there is barely any equity there to lose.
+ *
+ * The adjustment belongs on the UNCERTAIN part of the hand:
+ *
+ *   effective = e + (r - 1) * 2 * e * (1 - e)
+ *
+ * e(1-e) peaks at a coin flip and vanishes at both ends, and the factor of two
+ * makes this agree exactly with plain multiplication at e = 0.5, where the
+ * published realisation numbers were measured. So a hand that is genuinely
+ * 50/50 gets the full positional premium, a hand that is already 95% gets
+ * almost none of it, and the result is always a probability.
+ */
+export function realisedEquity(equity, factor) {
+  const e = Math.max(0, Math.min(1, equity));
+  const adjusted = e + (factor - 1) * 2 * e * (1 - e);
+  return Math.max(0, Math.min(1, adjusted));
 }
 
 /**

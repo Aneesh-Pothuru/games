@@ -37,7 +37,12 @@ import { GAMES } from '../games/index.js';
 import { randomSeed } from '../shared/rng.js';
 
 const STORAGE_KEY = 'room';
-/** Only move the alarm when the target shifts materially — setAlarm costs a row write. */
+/**
+ * Only move the alarm when the target shifts materially — setAlarm costs a row
+ * write. This is safe ONLY while an alarm is actually pending; the moment one
+ * fires, `armedAt` must be cleared or the next deadline inside this band is
+ * silently dropped and the game stops. See the top of alarm().
+ */
 const ALARM_EPSILON_MS = 30_000;
 /** Re-persist the TTL lazily rather than on every single message. */
 const TTL_WRITE_BAND_MS = 10 * 60 * 1000;
@@ -523,6 +528,15 @@ export class Lobby extends DurableObject {
     // lobby is never garbage-collected and its storage is billed forever —
     // so every path is wrapped and we always re-arm on failure.
     try {
+      // The alarm that woke us has already been consumed — the runtime clears
+      // it before calling in. `armedAt` is now a claim about an alarm that no
+      // longer exists, and leaving it set makes #rearm skip any new deadline
+      // within its epsilon of the old one. That is not hypothetical: a bot
+      // that thinks for 900ms sets a deadline well inside the 30-second band,
+      // #rearm declines to write it, and the table stalls forever with nobody
+      // on the clock.
+      this.armedAt = 0;
+
       const room = await this.#load();
       const now = Date.now();
 
@@ -547,7 +561,7 @@ export class Lobby extends DurableObject {
         if (outcome?.events) for (const e of outcome.events) this.#announce(e);
         this.#broadcast();
       } else {
-        this.armedAt = 0; // force the next #rearm to actually write
+        // Woke early (the TTL alarm, usually). Nothing to run, just re-arm.
         await this.#rearm();
       }
     } catch (err) {

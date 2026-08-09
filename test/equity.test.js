@@ -16,8 +16,10 @@ import { evaluate, freshDeck, parseCard } from '../src/games/poker/cards.js';
 import { equityVsRange, equityVsRandom, outsFor } from '../src/games/poker/equity.js';
 import { parseRange } from '../src/games/poker/notation.js';
 import {
-  alpha, commitmentAdvice, equityFromOuts, evOfBluff, evOfCall, geometricSizing,
-  impliedOddsNeeded, mdf, potOdds, requiredEquity, ruleOfTwoAndFour, spr, valueToBluff,
+  alpha, bluffShareOfRange, commitmentAdvice, equityForNextCard, equityFromOuts,
+  evOfBluff, evOfCall, geometricSizing, impliedOddsNeeded, mdf, potOdds,
+  realisationFactor, realisedEquity, requiredEquity, requiredEquityAtSpr, requiredEquityVsRaise,
+  requiredEquityWithImplied, ruleOfTwoAndFour, sizeForCombos, spr, valueToBluff,
 } from '../src/games/poker/odds.js';
 
 const C = (s) => s.trim().split(/\s+/).map(parseCard);
@@ -108,6 +110,59 @@ describe('equity vs a range', () => {
   test('the same spot always returns the same number', () => {
     const args = [C('Ah Kh'), C('Qh 7d 2c'), parseRange('TT+, AJs+')];
     assert.equal(equityVsRange(...args).equity, equityVsRange(...args).equity);
+  });
+
+  test('the ORDER of the hole cards does not change the answer', () => {
+    // The sampler is seeded from the spot. Seeding it from the cards in
+    // argument order means [Ah, Kh] and [Kh, Ah] are different spots, so the
+    // same hand returns two different equities depending on which way round
+    // the caller happened to pass them — the exact flicker the seeding is
+    // there to prevent. It shipped that way once.
+    const range = parseRange('TT+, AJs+');
+    const a = equityVsRange([C('Ah Kh')[0], C('Ah Kh')[1]], [], range);
+    const b = equityVsRange([C('Ah Kh')[1], C('Ah Kh')[0]], [], range);
+    assert.equal(a.equity, b.equity, 'AhKh and KhAh must be the same spot');
+  });
+
+  test('the order of the BOARD does not change the answer either', () => {
+    const range = parseRange('TT+, AJs+');
+    const board = C('Qh 7d 2c 9s');
+    const a = equityVsRange(C('Ah Kh'), board, range);
+    const b = equityVsRange(C('Ah Kh'), [board[2], board[0], board[3], board[1]], range);
+    assert.equal(a.equity, b.equity);
+  });
+
+  test('two different ranges of the same size get different samples', () => {
+    // Keying the seed on the number of surviving combos rather than on the
+    // range's identity means two unrelated ranges share a random stream, which
+    // correlates errors that should be independent.
+    const one = parseRange('AA, KK');       // 12 combos
+    const two = parseRange('72o');          // 12 combos
+    assert.equal(one.size + 0, 2);
+    const a = equityVsRange(C('Qh Qd'), [], one);
+    const b = equityVsRange(C('Qh Qd'), [], two);
+    assert.notEqual(a.equity, b.equity, 'these are not the same question');
+  });
+
+  test('every postflop street against a real range is EXACT, not sampled', () => {
+    // This is the point of the enumeration budget. A coach quoting "55.2%" on
+    // the flop should mean 55.2%, not 55.2 give or take half a point.
+    const range = parseRange('22+, A2s+, K9s+, QTs+, JTs, ATo+, KQo');
+    for (const board of ['Qh 7d 2c', 'Qh 7d 2c 9s', 'Qh 7d 2c 9s 4h']) {
+      const r = equityVsRange(C('Ah Kh'), C(board), range);
+      assert.ok(r.exact, `${board} should be enumerated`);
+      assert.equal(r.stdErr, 0, 'an exact answer has no error bar');
+    }
+  });
+
+  test('the reported error bar is a 95% half-width and shrinks as sqrt(n)', () => {
+    const range = parseRange('22+, A2s+, K9s+, QTs+, JTs, ATo+, KQo');
+    const small = equityVsRange(C('Ah Kh'), [], range, { samples: 2500 });
+    const big = equityVsRange(C('Ah Kh'), [], range, { samples: 40000 });
+    assert.ok(!small.exact && !big.exact, 'preflop is sampled');
+    // Four times the samples should halve the bar, to within rounding.
+    const ratio = small.stdErr / big.stdErr;
+    assert.ok(ratio > 3.4 && ratio < 4.6, `16x samples should shrink the bar 4x, got ${ratio}`);
   });
 
   test('blockers shrink the villain range', () => {
@@ -337,5 +392,130 @@ describe('SPR and sizing', () => {
 
   test('fewer streets means bigger bets', () => {
     assert.ok(geometricSizing(900, 100, 1) > geometricSizing(900, 100, 3));
+  });
+});
+
+describe('corrections that cost real money', () => {
+  test('a flop call buys ONE card, not two', () => {
+    // Nine-out flush draw facing half pot. Two-card equity says comfortable
+    // call; one-card equity says fold by nearly six points. The call is
+    // usually still right — but for implied odds, not for this reason.
+    const required = requiredEquity(50, 150);
+    near(required, 0.25, 1e-9, 'price');
+    near(equityFromOuts(9, 'flop'), 0.3497, 0.0005, 'both cards');
+    near(equityForNextCard(9, 'flop'), 0.1915, 0.0005, 'the card you are buying');
+    assert.ok(equityFromOuts(9, 'flop') > required, 'the two-card number says call');
+    assert.ok(equityForNextCard(9, 'flop') < required, 'the honest number says fold');
+  });
+
+  test('required equity heads-up never exceeds 50%, however large the bet', () => {
+    let last = 0;
+    for (const bet of [50, 100, 200, 500, 5000, 1e6]) {
+      const r = requiredEquity(bet, 100 + bet);
+      assert.ok(r < 0.5, `${bet}: ${r}`);
+      assert.ok(r > last, 'and it rises monotonically');
+      last = r;
+    }
+  });
+
+  test('facing a raise is not the same shape as facing a bet', () => {
+    // Pot 100, you bet 50, villain raises to 150. You call 100 into 300.
+    near(requiredEquityVsRaise(100, 50, 150), 0.25, 1e-9, '3x raise of a half-pot bet');
+    // The common error treats the raise size as the call.
+    const wrong = requiredEquity(150, 250);
+    assert.ok(wrong > 0.37, 'the error reports far more than the truth');
+  });
+
+  test('alpha is not the bluff share of the range', () => {
+    // At pot-sized: a bluff must work 50% of the time, but bluffs should be
+    // a third of the betting range. Conflating them over-bluffs by half.
+    near(alpha(100, 100), 0.5, 1e-9, 'alpha at pot');
+    near(bluffShareOfRange(100, 100), 1 / 3, 1e-9, 'bluff share at pot');
+    near(bluffShareOfRange(50, 100), 0.25, 1e-9, 'bluff share at half pot');
+  });
+
+  test('the combos you hold decide the size, not the other way round', () => {
+    near(sizeForCombos(12, 4), 0.5, 1e-9, '12 value, 4 bluffs -> half pot');
+    near(sizeForCombos(12, 6), 1, 1e-9, '12 value, 6 bluffs -> pot');
+    near(sizeForCombos(20, 4), 0.25, 1e-9, '20 value, 4 bluffs -> quarter pot');
+    assert.equal(sizeForCombos(6, 12), null, 'over-bluffed at every size');
+  });
+
+  test('SPR barely changes the price but changes everything else', () => {
+    near(requiredEquityAtSpr(1), 1 / 3, 1e-9, 'SPR 1');
+    near(requiredEquityAtSpr(3), 0.4286, 0.0005, 'SPR 3');
+    near(requiredEquityAtSpr(6), 0.4615, 0.0005, 'SPR 6');
+    near(requiredEquityAtSpr(20), 0.4878, 0.0005, 'SPR 20');
+    // Barely two points across a range where the correct stack-off standard
+    // goes from top pair to a set. The price is not the mechanism.
+    assert.ok(requiredEquityAtSpr(20) - requiredEquityAtSpr(6) < 0.03);
+  });
+
+  test('reverse implied odds move the requirement violently', () => {
+    near(requiredEquityWithImplied(100, 200), 1 / 3, 1e-9, 'no later money');
+    near(requiredEquityWithImplied(100, 200, 0, 100), 0.5, 1e-9, 'losing another call');
+    near(requiredEquityWithImplied(100, 200, 0, 300), 2 / 3, 1e-9, 'losing three more');
+    assert.ok(requiredEquityWithImplied(100, 200, 200, 0) < 1 / 3, 'implied odds cut it');
+  });
+
+  test('realisation is applied to the uncertain part, not multiplied in', () => {
+    // Multiplying is the obvious implementation and it is wrong at both ends.
+    // 95% x 1.23 = 117%, which is not a probability; 70% x 1.23 = 86%, which
+    // claims position conjures sixteen points out of a hand that is already
+    // well ahead. The adjustment has to vanish where the hand is decided.
+    const ip = 1.23;
+    const oop = 0.82;
+
+    // Exactly plain multiplication at a coin flip, which is where the
+    // published realisation factors were measured.
+    near(realisedEquity(0.5, ip), 0.5 * ip, 1e-9, 'coin flip in position');
+    near(realisedEquity(0.5, oop), 0.5 * oop, 1e-9, 'coin flip out of position');
+
+    // And it never runs off the end of the scale, which multiplying does.
+    assert.ok(realisedEquity(0.95, ip) < 1, '117% is not a probability');
+    assert.ok(realisedEquity(0.95, ip) < 0.95 * ip, 'a near-lock has nothing left to gain');
+    assert.ok(realisedEquity(0.70, ip) < 0.70 * ip);
+
+    // The adjustment is largest where the hand is least decided and vanishes
+    // at both ends — you cannot gain much on a hand that is already won, and
+    // you cannot lose much of an equity you barely have.
+    const shift = (e) => Math.abs(realisedEquity(e, oop) - e);
+    assert.ok(shift(0.5) > shift(0.15), 'a coin flip moves more than a 15% hand');
+    assert.ok(shift(0.5) > shift(0.9), 'and more than a 90% hand');
+    assert.ok(shift(0.02) < 0.02, 'a hopeless hand has almost nothing to give up');
+    assert.ok(shift(0.98) < 0.02, 'and a locked one has almost nothing to gain');
+
+    // Always a probability, for any factor the model can produce.
+    for (let e = 0; e <= 1.0001; e += 0.02) {
+      for (const r of [0.5, 0.82, 1, 1.23, 1.6]) {
+        const x = realisedEquity(e, r);
+        assert.ok(x >= 0 && x <= 1, `realised(${e}, ${r}) = ${x}`);
+      }
+    }
+  });
+
+  test('realisation preserves the direction and the fixed points', () => {
+    assert.equal(realisedEquity(0, 1.5), 0, 'no equity stays no equity');
+    assert.equal(realisedEquity(1, 0.5), 1, 'a lock stays a lock');
+    assert.equal(realisedEquity(0.42, 1), 0.42, 'a factor of one changes nothing');
+    for (let e = 0.05; e < 1; e += 0.05) {
+      assert.ok(realisedEquity(e, 1.2) > e, 'in position is always a gain');
+      assert.ok(realisedEquity(e, 0.85) < e, 'out of position is always a loss');
+    }
+  });
+
+  test('realisation is above 1 in position and below it out of position', () => {
+    assert.ok(realisationFactor({ inPosition: true }) > 1.1);
+    assert.ok(realisationFactor({ inPosition: false }) < 0.9);
+    assert.ok(
+      realisationFactor({ inPosition: true, suited: true })
+        > realisationFactor({ inPosition: true }),
+      'suited realises more',
+    );
+    assert.ok(
+      realisationFactor({ inPosition: false, capped: true })
+        < realisationFactor({ inPosition: false }),
+      'capped realises less',
+    );
   });
 });

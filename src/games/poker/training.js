@@ -1,0 +1,366 @@
+/**
+ * THE LAB — hold'em against AI opponents, with a coach reading over your
+ * shoulder.
+ *
+ * A separate game from multiplayer hold'em rather than a mode inside it. The
+ * rules engine is shared and untouched; what differs is that most of the seats
+ * are bots, one human decision drives the whole table, and every action you
+ * take gets a number attached to it.
+ *
+ * The teaching loop, in the order the evidence says it works:
+ *   1. you see the spot and the numbers, but NOT what the bots hold
+ *   2. you commit — no undo, no peeking at the answer first
+ *   3. immediate feedback: EV of what you did, EV of the best line, the gap
+ *   4. only then the runout, explicitly labelled as irrelevant to the grade
+ *
+ * Step 4 is the one that matters most and is the easiest to get wrong. People
+ * rate identical decisions as better when the outcome happened to be good, and
+ * poker is the purest machine ever built for learning the wrong lesson from a
+ * win. So the grade lands before the cards do.
+ */
+
+import { makeRng, randInt, shuffle } from '../../shared/rng.js';
+import { clampInt, oneOf } from '../engine.js';
+import * as holdem from './index.js';
+import { PERSONALITIES, PERSONALITY_IDS, applyResult, decide, makeBot } from './bots.js';
+import { analyse, emptyScorecard, grade, record, summarise } from './coach.js';
+import { POSITIONS } from './ranges.js';
+
+export const meta = {
+  id: 'pokerlab',
+  name: 'The Lab',
+  tagline: 'Hold’em against bots, with the maths shown.',
+  blurb:
+    'Play no-limit hold’em against opponents that each have one exploitable habit, with a coach that shows your equity, the price you are getting, and what the best line was — graded in big blinds, before you see the cards.',
+  minPlayers: 1,
+  maxPlayers: 4,
+  familiar: 'Poker trainer',
+  emblem: 'g-pokerlab',
+  lengthMinutes: 'as long as you like',
+  solo: true,
+};
+
+export const defaultConfig = {
+  startingStack: 2000,
+  actionSeconds: 0, // no clock: this is practice, thinking is the point
+  table: 'mixed',
+  coach: 'full',
+};
+
+export function normalizeConfig(config) {
+  return {
+    startingStack: clampInt(config.startingStack, 500, 20000, 2000),
+    actionSeconds: 0,
+    table: oneOf(config.table, ['mixed', 'loose', 'tough'], 'mixed'),
+    coach: oneOf(config.coach, ['full', 'quiet'], 'full'),
+  };
+}
+
+/** Bot pacing. Long enough to read the table, short enough not to wait on it. */
+const BOT_THINK_MS = 900;
+const HANDOVER_MS = 60_000; // you deal the next hand when you are ready
+
+const TABLES = {
+  mixed: ['mercy', 'kaz', 'rocky'],
+  loose: ['mercy', 'blaze', 'vera'],
+  tough: ['sol', 'kaz', 'vera'],
+};
+
+// -------------------------------------------------------------------- start --
+
+export function start(room, seed, now) {
+  const rng = makeRng(seed);
+  const humans = room.players.filter((p) => !p.bot);
+  const wanted = TABLES[room.config.table] ?? TABLES.mixed;
+  const ids = shuffle(PERSONALITY_IDS.filter((p) => wanted.includes(p)), rng);
+
+  // Seat bots for every chair the humans did not take.
+  const seatCount = Math.max(2, Math.min(4, humans.length + wanted.length));
+  const bots = [];
+  for (let i = 0; humans.length + bots.length < seatCount; i++) {
+    const personality = ids[i % ids.length];
+    const id = `bot:${personality}:${i}`;
+    bots.push({
+      id,
+      tok: id,
+      name: PERSONALITIES[personality].name,
+      seat: humans.length + i,
+      left: false,
+      bot: true,
+      personality,
+    });
+  }
+  // The lobby's player list is what the hand engine deals to, so the bots have
+  // to live there — they are seats at the table, not an overlay on top of one.
+  room.players = [...humans, ...bots];
+
+  const game = holdem.start(room, seed, now);
+  game.lab = {
+    bots: Object.fromEntries(bots.map((b, i) => [b.id, makeBot(b.id, b.personality, (seed ^ (i * 2654435761)) >>> 0)])),
+    humanIds: humans.map((p) => p.id),
+    scorecards: Object.fromEntries(humans.map((p) => [p.id, emptyScorecard()])),
+    advice: null,
+    lastGrade: null,
+    // Held back until the hand is over, so the runout never colours the grade.
+    pending: [],
+    revealBots: false,
+  };
+  // The lobby assigns this too, but everything below reads room.game and runs
+  // before start() has returned.
+  room.game = game;
+  // The button decides who acts first, and about half the time that is a bot.
+  // Leaving the deadline null there means the lobby schedules no alarm, no bot
+  // ever acts, and the very first hand stalls before the flop with nobody at
+  // the table to press anything. Put the table on its own clock from the deal.
+  scheduleNext(room, now);
+  return game;
+}
+
+// ------------------------------------------------------------------ helpers --
+
+const isBot = (room, id) => room.players.find((p) => p.id === id)?.bot === true;
+
+/** Which seat, in poker terms, relative to the button. */
+function positionOf(g, seatIndex) {
+  const live = g.seats.filter((s) => s.inHand).length;
+  const fromButton = (seatIndex - g.buttonIndex + g.seats.length) % g.seats.length;
+  if (fromButton === 0) return 'BTN';
+  if (fromButton === 1) return live === 2 ? 'BB' : 'SB';
+  if (fromButton === 2) return 'BB';
+  return POSITIONS[Math.max(0, POSITIONS.length - 1 - fromButton)] ?? 'UTG';
+}
+
+function viewForBot(room, g, seat, index) {
+  const v = holdem.viewFor(room, seat.id);
+  return {
+    hole: seat.hole,
+    board: g.board,
+    street: g.street,
+    pot: v.potTotal,
+    toCall: v.legal?.callAmount ?? Math.max(0, g.round.currentBet - seat.committedThisRound),
+    minRaiseTo: v.legal?.minRaiseTo || g.round.currentBet + g.round.lastFullRaiseSize,
+    maxRaiseTo: v.legal?.maxRaiseTo || seat.committedThisRound + seat.stack,
+    canCheck: g.round.currentBet <= seat.committedThisRound,
+    canRaise: seat.committedThisRound + seat.stack > g.round.currentBet,
+    bigBlind: v.blinds.bb,
+    position: positionOf(g, index),
+    seatsIn: g.seats.filter((s) => s.inHand && !s.folded).length,
+    handNo: g.handNo,
+  };
+}
+
+/** The advice panel for whoever is on the clock, recomputed when the spot changes. */
+function refreshAdvice(room, now) {
+  const g = room.game;
+  if (g.phase !== 'hand' || g.actor < 0) {
+    g.lab.advice = null;
+    return;
+  }
+  const seat = g.seats[g.actor];
+  if (isBot(room, seat.id) || room.config.coach === 'quiet') {
+    g.lab.advice = null;
+    return;
+  }
+  const v = holdem.viewFor(room, seat.id);
+  if (!v.legal) {
+    g.lab.advice = null;
+    return;
+  }
+  const index = g.seats.indexOf(seat);
+  g.lab.advice = analyse({
+    hole: seat.hole,
+    board: g.board,
+    street: g.street,
+    pot: v.potTotal,
+    toCall: v.legal.callAmount,
+    minRaiseTo: v.legal.minRaiseTo,
+    maxRaiseTo: v.legal.maxRaiseTo,
+    canCheck: v.legal.check,
+    canRaise: v.legal.raise,
+    bigBlind: v.blinds.bb,
+    stack: seat.stack,
+    position: positionOf(g, index),
+    opponents: g.seats.filter((s) => s.inHand && !s.folded && s.id !== seat.id).length,
+    villainWidth: averageWidth(room, g),
+  });
+}
+
+/** How wide the remaining opponents are, so equity is measured against them. */
+function averageWidth(room, g) {
+  const live = g.seats.filter((s) => s.inHand && !s.folded && isBot(room, s.id));
+  if (!live.length) return 0.35;
+  let total = 0;
+  for (const s of live) {
+    const bot = g.lab.bots[s.id];
+    const rfi = bot?.p?.rfi?.BTN ?? 0.4;
+    total += Math.min(0.9, rfi * 1.6);
+  }
+  return total / live.length;
+}
+
+// ------------------------------------------------------------------ actions --
+
+export function action(room, playerId, act, now) {
+  const g = room.game;
+  if (act.type === 'act') {
+    const seat = g.seats[g.actor];
+    if (!seat || seat.id !== playerId) return { error: 'not_your_turn' };
+
+    // Grade BEFORE the action resolves, while the spot still exists.
+    let graded = null;
+    if (g.lab.advice) {
+      graded = grade(g.lab.advice, { move: act.move, to: act.to });
+      record(g.lab.scorecards[playerId] ?? emptyScorecard(), graded);
+    }
+
+    const outcome = holdem.action(room, playerId, act, now);
+    if (outcome.error) return outcome;
+
+    g.lab.lastGrade = graded;
+    return afterAnyAction(room, now, outcome);
+  }
+
+  if (act.type === 'deal') {
+    if (g.phase !== 'handover') return { error: 'wrong_phase' };
+    g.lab.revealBots = false;
+    g.lab.lastGrade = null;
+    const outcome = holdem.action(room, playerId, act, now) ?? {};
+    return afterAnyAction(room, now, outcome);
+  }
+
+  // The runout is deliberately hidden until you ask for it, so the grade
+  // always lands first.
+  if (act.type === 'reveal') {
+    g.lab.revealBots = true;
+    return {};
+  }
+
+  return { error: 'unknown_action' };
+}
+
+/**
+ * Bots act on the alarm rather than inside this call, so the table paces
+ * itself and you watch each decision land instead of seeing four at once.
+ */
+function scheduleNext(room, now) {
+  const g = room.game;
+  if (g.phase === 'hand' && g.actor >= 0 && isBot(room, g.seats[g.actor].id)) {
+    g.deadline = now + BOT_THINK_MS;
+  } else if (g.phase === 'handover') {
+    g.deadline = now + HANDOVER_MS;
+    settleTilt(room);
+  } else {
+    // A human on the clock has no deadline at all. Thinking is the point, and
+    // a trainer that times you out is teaching you to guess.
+    g.deadline = null;
+  }
+  refreshAdvice(room, now);
+}
+
+function afterAnyAction(room, now, outcome) {
+  scheduleNext(room, now);
+  return outcome;
+}
+
+export function onDeadline(room, now) {
+  const g = room.game;
+
+  if (g.phase === 'handover') {
+    // Nobody dealt for a full minute; deal anyway so the table never stalls.
+    const outcome = holdem.onDeadline(room, now) ?? {};
+    g.lab.revealBots = false;
+    g.lab.lastGrade = null;
+    return afterAnyAction(room, now, outcome);
+  }
+
+  if (g.phase !== 'hand' || g.actor < 0) return {};
+  const seat = g.seats[g.actor];
+  if (!isBot(room, seat.id)) {
+    // A human has no clock in the lab. Thinking is the whole point.
+    g.deadline = null;
+    return {};
+  }
+
+  const bot = g.lab.bots[seat.id];
+  const index = g.seats.indexOf(seat);
+  const move = decide(bot, viewForBot(room, g, seat, index));
+  const outcome = holdem.action(room, seat.id, { type: 'act', move: move.move, to: move.to }, now);
+  if (outcome.error) {
+    // A bot must never wedge the table. Fall back to the safest legal action.
+    const fallback = holdem.action(room, seat.id, { type: 'act', move: 'fold' }, now);
+    return afterAnyAction(room, now, fallback ?? {});
+  }
+  seat.lastReason = move.why;
+  return afterAnyAction(room, now, outcome);
+}
+
+function settleTilt(room) {
+  const g = room.game;
+  for (const seat of g.seats) {
+    const bot = g.lab.bots[seat.id];
+    if (!bot) continue;
+    const won = g.result?.won?.[seat.id] ?? 0;
+    applyResult(bot, { lostChips: Math.max(0, seat.totalCommitted - won), stack: seat.stack + seat.totalCommitted });
+  }
+}
+
+// --------------------------------------------------------------------- view --
+
+export function viewFor(room, viewerId) {
+  const g = room.game;
+  const base = holdem.viewFor(room, viewerId);
+  const lab = g.lab;
+  const me = g.seats.find((s) => s.id === viewerId);
+
+  return {
+    ...base,
+    game: 'pokerlab',
+    lab: true,
+    // The bots' cards stay down until the hand is over AND you have asked —
+    // the grade lands first, always.
+    seats: base.seats.map((s) => {
+      const player = room.players.find((p) => p.id === s.id);
+      const bot = lab.bots[s.id];
+      return {
+        ...s,
+        bot: Boolean(player?.bot),
+        personality: player?.personality ?? null,
+        tell: bot ? PERSONALITIES[player.personality]?.tell : null,
+        reason: g.phase !== 'hand' ? (g.seats.find((x) => x.id === s.id)?.lastReason ?? null) : null,
+        hole: lab.revealBots || s.id === viewerId ? s.hole : null,
+      };
+    }),
+    advice: g.actor >= 0 && g.seats[g.actor]?.id === viewerId ? lab.advice : null,
+    lastGrade: lab.lastGrade,
+    revealed: lab.revealBots,
+    scorecard: summarise(lab.scorecards[viewerId] ?? emptyScorecard()),
+    myStack: me?.stack ?? 0,
+  };
+}
+
+export const rulesText = [
+  {
+    h: 'What this is',
+    p: 'No-limit hold’em against three bots, with the maths shown while you decide. Same rules as the real game — the difference is that every choice you make gets a number attached to it.',
+  },
+  {
+    h: 'The numbers',
+    p: 'Your equity against what they can actually hold, the price the pot is laying you, your outs, and the stack-to-pot ratio. Equity is sampled and shows its error bar; pot odds are arithmetic and do not.',
+  },
+  {
+    h: 'The grade',
+    p: 'After you act you get the EV of your choice against the EV of the best one, in big blinds. Under 0.05 is the same decision. Over 1 is a blunder. If two lines are within a hair, it says so instead of inventing a winner.',
+  },
+  {
+    h: 'Why the cards stay down',
+    p: 'You get graded before you see the runout. People rate the same decision as better when it happened to win, and poker is the best machine ever built for learning the wrong lesson. Judge the choice, then look.',
+  },
+  {
+    h: 'The opponents',
+    p: 'Each bot has one exploitable habit and it is written on their seat. Mercy never folds, so stop bluffing her. Rocky folds his blind, so raise every button. Blaze bluffs constantly, so call him down. Sol has no leak at all.',
+  },
+  {
+    h: 'Progress',
+    p: 'EV lost per hundred decisions. It settles after a few hundred hands, where win rate needs tens of thousands — it is the only number short of a lifetime that tells you whether you are getting better.',
+  },
+];

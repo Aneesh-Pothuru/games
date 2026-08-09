@@ -458,6 +458,9 @@ function gameScreen() {
     again: () => state.conn?.send({ t: 'playAgain' }),
     playerTile, playerList, nameOf, avatarFor, select, selected: () => state.selection,
     revealed: state.revealed, setRevealed: (v) => { state.revealed = v; render(); },
+    // For UI that swaps panes without a server round-trip, e.g. opening the
+    // bet sizer. Anything that changes game state must go through send().
+    rerender: render,
   };
 
   const body = inLobby ? lobbyBody(ctx) : ui.body(ctx);

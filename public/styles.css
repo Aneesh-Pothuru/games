@@ -614,6 +614,18 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
    even though a chip used as a static label does not. */
 button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 
+/* Hold-to-peek role chip. Masked by default so a glance from across the table
+   gets nothing; the label text is swapped, not merely hidden, so it is absent
+   from the DOM at rest. */
+.chip--peek { color: var(--text-3); }
+.chip--peek .chip__masked { font-variant: small-caps; letter-spacing: 0.06em; }
+.chip--peek::before {
+  content: ''; width: 9px; height: 9px; border-radius: 2px;
+  background: currentColor; opacity: 0.5;
+}
+.chip--peek.is-peeking { box-shadow: inset 0 0 0 2px currentColor; }
+.chip--peek.is-peeking::before { opacity: 1; border-radius: 50%; }
+
 /* --------------------------------------------------------------- banners -- */
 .banner {
   padding: var(--sp-3) var(--sp-4); border-radius: var(--r-3);
@@ -750,6 +762,90 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
   font-size: var(--t-xs); font-weight: 700; color: var(--text-2);
 }
 .seg button[aria-pressed='true'] { background: var(--bg-hover); color: var(--text-1); box-shadow: var(--e-1); }
+
+/* ---------------------------------------------------------- playing cards - */
+/* Cards are typography, not artwork: no images, no web fonts, nothing to load.
+   The rank sits top-left and the suit fills the body, so a card is still
+   readable when it is 26px wide in a seat row. */
+.pcard {
+  --pc-w: 46px;
+  position: relative; display: inline-flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  width: var(--pc-w); height: calc(var(--pc-w) * 1.4);
+  border-radius: calc(var(--pc-w) * 0.13);
+  background: #f6f3ea; color: #14181f;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5), inset 0 0 0 var(--hair) rgba(0, 0, 0, 0.28);
+  font-variant-numeric: tabular-nums; line-height: 1; user-select: none;
+}
+.pcard--xs { --pc-w: 22px; }
+.pcard--sm { --pc-w: 32px; }
+.pcard--md { --pc-w: 46px; }
+.pcard--lg { --pc-w: 74px; }
+.pcard__rank { font-size: calc(var(--pc-w) * 0.44); font-weight: 800; letter-spacing: -0.02em; }
+.pcard__suit { font-size: calc(var(--pc-w) * 0.4); line-height: 1; }
+.pcard--red { color: #c62f28; }
+.pcard--black { color: #14181f; }
+.pcard.is-dim { opacity: 0.42; }
+/* The winning five, marked with a ring rather than a colour — colour alone
+   would be invisible to a third of the table's eyes on a phone in a bar. */
+.pcard.is-best { box-shadow: 0 0 0 2px var(--success), 0 2px 8px rgba(0, 0, 0, 0.45); }
+.pcard--back {
+  background: var(--card-stock); color: transparent;
+  box-shadow: inset 0 0 0 var(--hair) var(--line-2);
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05) 0 3px, transparent 3px 6px);
+}
+.pcard--slot {
+  background: none; box-shadow: inset 0 0 0 var(--hair) var(--line); opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------- holdem -- */
+.pokerpot {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2);
+}
+.pokerpot__amt { font-size: var(--t-xl); font-weight: 800; color: var(--game-accent); font-variant-numeric: tabular-nums; }
+.pokerboard {
+  display: flex; gap: var(--sp-2); justify-content: center; align-items: center;
+  padding: var(--sp-3) var(--sp-2); border-radius: var(--r-3);
+  background: var(--bg-inset); box-shadow: inset 0 0 0 var(--hair) var(--line);
+  /* Five cards must fit at 320px. They shrink rather than wrap or overflow. */
+  min-width: 0;
+}
+.pokerboard .pcard { --pc-w: min(46px, 16vw); flex: 0 0 auto; }
+
+.pokerhand {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-3); border-radius: var(--r-3);
+  background: var(--bg-raised); box-shadow: inset 0 0 0 var(--hair) var(--line);
+}
+.pokerhand.is-folded { opacity: 0.6; }
+.pokerhand__cards { display: flex; gap: var(--sp-2); flex: 0 0 auto; }
+.pokerhand__meta { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.pokerhand__name { font-size: var(--t-md); color: var(--text-1); }
+.pokerpeek { display: inline-flex; gap: 2px; }
+.bdg--btn { font-weight: 800; font-size: var(--t-2xs); color: var(--text-1); box-shadow: inset 0 0 0 var(--hair) var(--line-strong); }
+
+/* Fold is fixed-width and separated; check/call is the widest, safest target. */
+.pokeract { display: flex; gap: var(--sp-2); width: 100%; }
+.pokeract .btn { flex: 1 1 0; min-width: 0; padding-inline: var(--sp-2); }
+.pokeract .btn--danger { flex: 0 0 auto; min-width: 84px; }
+
+.raise { display: flex; flex-direction: column; gap: var(--sp-3); width: 100%; }
+.raise__head { display: flex; align-items: baseline; justify-content: space-between; }
+.raise__amt { font-size: var(--t-xl); font-weight: 800; color: var(--game-accent); font-variant-numeric: tabular-nums; }
+.raise__slider { width: 100%; height: var(--tap); background: none; }
+.raise__slider::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: var(--bg-inset); }
+.raise__slider::-moz-range-track { height: 8px; border-radius: 999px; background: var(--bg-inset); }
+.raise__slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; margin-top: -12px;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--game-accent); box-shadow: var(--e-2);
+}
+.raise__slider::-moz-range-thumb {
+  width: 32px; height: 32px; border: none; border-radius: 50%;
+  background: var(--game-accent); box-shadow: var(--e-2);
+}
+.seg--wrap { flex-wrap: wrap; }
+.seg--wrap button { flex: 1 1 0; }
 
 /* ------------------------------------------------------------ reveal log -- */
 .log { display: flex; flex-direction: column; gap: var(--sp-2); }

@@ -21,10 +21,15 @@ import * as council from './council.js';
 import * as sabotage from './sabotage.js';
 import * as spectrum from './spectrum.js';
 import * as nightfall from './nightfall.js';
+import * as holdem from './poker/index.js';
 
-const MODULES = [oddoneout, nightfall, council, sabotage, spectrum];
+const MODULES = [oddoneout, spectrum, nightfall, holdem, council, sabotage];
 
 export const GAMES = Object.fromEntries(MODULES.map((m) => [m.meta.id, m]));
 
-/** Ordered for the picker: quickest and easiest to teach first. */
+/**
+ * Ordered for the picker. Spectrum is second because it is the only game that
+ * works with two people, and a pair opening the app should not have to scroll
+ * past four games they cannot play.
+ */
 export const GAME_LIST = MODULES.map((m) => m.meta);

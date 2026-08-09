@@ -153,6 +153,80 @@ check('an unknown seat is refused', unknownSeat === 'refused', `got ${unknownSea
 // --- room locks once started ---
 check('cannot join a game in progress', (await post('/api/join', { code, name: 'Late' })).status === 409);
 
+// --- poker: the deck and everyone else's cards must never reach the wire ---
+{
+  const pk = await post('/api/create', { game: 'holdem', name: 'Ana' });
+  check('creates a poker room', pk.status === 200, JSON.stringify(pk.body));
+  const pcode = pk.body.code;
+  const pseats = [pk.body];
+  for (const name of ['Ben', 'Cleo']) {
+    const res = await post('/api/join', { code: pcode, name });
+    pseats.push(res.body);
+  }
+
+  const pboxes = pseats.map(() => []);
+  const psockets = await Promise.all(pseats.map((s, i) => new Promise((resolve) => {
+    const ws = new WebSocket(`ws://localhost:8787/ws?code=${pcode}&pid=${s.pid}&tok=${s.tok}`);
+    ws.addEventListener('message', (e) => { try { pboxes[i].push(JSON.parse(e.data)); } catch {} });
+    ws.addEventListener('open', () => resolve(ws));
+    ws.addEventListener('error', () => resolve(ws));
+  })));
+  await new Promise((r) => setTimeout(r, 400));
+  psockets[0].send(JSON.stringify({ t: 'start' }));
+  await new Promise((r) => setTimeout(r, 600));
+
+  const platest = (i) => [...pboxes[i]].reverse().find((m) => m.t === 'state');
+  const pviews = pseats.map((_, i) => platest(i)?.view);
+  check('poker deals to everyone', pviews.every((v) => v?.game === 'holdem'), JSON.stringify(pviews.map((v) => v?.game)));
+
+  const raw = pviews.map((v) => JSON.stringify(v));
+  check('the deck is never on the wire', raw.every((s) => !s.includes('"deck"')));
+  check('the burn pointer is never on the wire', raw.every((s) => !s.includes('deckPos')));
+
+  for (let i = 0; i < pviews.length; i++) {
+    const v = pviews[i];
+    const mine = v.seats.find((s) => s.id === pseats[i].pid);
+    check(`seat ${i} sees its own two cards`, mine?.hole?.length === 2);
+    const leaked = v.seats.filter((s) => s.id !== pseats[i].pid && s.hole !== null);
+    check(`seat ${i} sees nobody else's cards`, leaked.length === 0, JSON.stringify(leaked.map((s) => s.id)));
+    // The strongest form: another player's actual cards must not appear
+    // anywhere in this player's payload, under any key.
+    const others = pviews
+      .filter((_, j) => j !== i)
+      .map((ov) => ov.seats.find((s) => s.id === pseats[pviews.indexOf(ov)].pid)?.hole ?? []);
+    const flat = others.flat();
+    const visible = new Set([...(mine?.hole ?? []), ...v.board]);
+    const found = flat.filter((c) => !visible.has(c) && raw[i].includes(`,${c},`));
+    check(`seat ${i}'s payload contains no foreign card values`, found.length === 0, found.join(','));
+  }
+
+  const clocks = pviews.filter((v) => v.myTurn);
+  check('exactly one player is on the clock', clocks.length === 1, `got ${clocks.length}`);
+  const idle = pviews.find((v) => !v.myTurn);
+  check('players off the clock get no legal actions', idle.legal === null);
+
+  // An action from the wrong player must be refused by the server, not merely
+  // hidden by the client.
+  const wrongIndex = pviews.findIndex((v) => !v.myTurn);
+  pboxes[wrongIndex].length = 0;
+  psockets[wrongIndex].send(JSON.stringify({ t: 'action', action: { type: 'act', move: 'fold' } }));
+  await new Promise((r) => setTimeout(r, 400));
+  check('acting out of turn is rejected',
+    pboxes[wrongIndex].some((m) => m.t === 'reject' && m.why === 'not_your_turn'),
+    JSON.stringify(pboxes[wrongIndex]).slice(0, 160));
+
+  // And an illegal raise size must be refused too.
+  const rightIndex = pviews.findIndex((v) => v.myTurn);
+  pboxes[rightIndex].length = 0;
+  psockets[rightIndex].send(JSON.stringify({ t: 'action', action: { type: 'act', move: 'raise', to: 1 } }));
+  await new Promise((r) => setTimeout(r, 400));
+  check('an under-minimum raise is rejected',
+    pboxes[rightIndex].some((m) => m.t === 'reject' && m.why === 'raise_too_small'),
+    JSON.stringify(pboxes[rightIndex]).slice(0, 160));
+
+  for (const ws of psockets) { try { ws.close(); } catch {} }
+}
+
 // --- oversized frames are rejected ---
 inbox[1].length = 0;
 sockets[1].send(JSON.stringify({ t: 'action', action: { type: 'ack' }, pad: 'x'.repeat(5000) }));

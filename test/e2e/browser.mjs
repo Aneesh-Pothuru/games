@@ -40,17 +40,58 @@ check('no horizontal overflow on the home screen', !overflow);
 
 await host.screenshot({ path: `${OUT}/01-home.png` });
 
-await host.fill('#name', 'Ana');
+// --- REGRESSION: tapping Start with no name must give visible feedback ---
+// This previously rendered an error ~600px below the fold with no toast, so
+// the button looked completely dead.
+{
+  const small = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+  const sp = await small.newPage();
+  await sp.goto('http://localhost:8787/');
+  await sp.waitForSelector('.gametile');
+
+  const tileY = (await sp.locator('.gametile').first().boundingBox()).y;
+  check('first game is above the fold on a 375x667 phone', tileY < 400, `y=${Math.round(tileY)}`);
+
+  await sp.locator('.gametile').first().click();
+  await sp.locator('.bar--bottom .btn--primary').click();
+  await sp.waitForTimeout(600);
+  const toastBox = await sp.locator('.toast').first().boundingBox().catch(() => null);
+  check('empty name produces visible feedback', Boolean(toastBox), 'no toast rendered');
+  if (toastBox) {
+    check('that feedback is on screen', toastBox.y >= 0 && toastBox.y < 667, `y=${Math.round(toastBox.y)}`);
+  }
+
+  // --- REGRESSION: typing a game name into the code box must not dead-end ---
+  await sp.fill('#code', 'SPYFALL');
+  await sp.waitForTimeout(400);
+  const rescue = await sp.locator('#rescue').innerText().catch(() => '');
+  check('typing "spyfall" offers the right game', /odd one out/i.test(rescue), rescue.slice(0, 60));
+
+  // --- Every game names the thing people are looking for ---
+  const tiles = await sp.locator('.gametile').allInnerTexts();
+  for (const want of ['Spyfall', 'Secret Hitler', 'Wavelength', 'Werewolf', 'Avalon']) {
+    check(`"${want}" is findable on the home screen`, tiles.some((t) => t.includes(want)));
+  }
+  await sp.screenshot({ path: `${OUT}/00-home-small.png` });
+  await small.close();
+}
+
 await host.locator('.gametile', { hasText: 'The Council' }).click();
+await host.fill('#startbar-name', 'Ana');
 await host.locator('.bar--bottom .btn--primary').click();
 await host.waitForSelector('.roomcode', { timeout: 10000 });
 const code = (await host.locator('.roomcode__cells').innerText()).replace(/\s/g, '');
 check('room code is four letters', /^[BCDFGHJKMNPQRSTVWXYZ]{4}$/.test(code), code);
 await host.screenshot({ path: `${OUT}/02-lobby-host.png` });
 
-// start button states its own blocker
+// Short of players, the primary action must be something you can DO. A
+// disabled button with nothing beside it is the dead end that made this look
+// broken to the owner.
 const startLabel = await host.locator('.bar--bottom .btn--primary').innerText();
-check('disabled start button says why', /Need 5 players/i.test(startLabel), startLabel);
+check('under-min lobby offers a real action', /invite/i.test(startLabel), startLabel);
+check('that action is enabled', await host.locator('.bar--bottom .btn--primary').isEnabled());
+check('the requirement is still stated somewhere',
+  /needs? \d|at least \d/i.test(await host.locator('.screen').innerText()));
 
 // --- five more join by deep link ---
 const names = ['Ben', 'Cleo', 'Dev', 'Eve', 'Fay'];
@@ -166,6 +207,34 @@ const shell = await host.evaluate(() => {
   return { overflow: s.overflow, overscroll: s.overscrollBehavior, touch: s.touchAction };
 });
 check('body does not scroll', shell.overflow === 'hidden', JSON.stringify(shell));
+
+// --- REGRESSION: content taller than the viewport must be REACHABLE ---
+// "body does not scroll" passing is not enough -- it was the SYMPTOM of a bug
+// where .flow collapsed to content height, never scrolled, and everything past
+// the fold was silently clipped by body's overflow:hidden.
+{
+  const small = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+  const sp = await small.newPage();
+  for (const [label, url] of [['home', 'http://localhost:8787/']]) {
+    await sp.goto(url);
+    await sp.waitForSelector('.gametile');
+    const m = await sp.evaluate(() => {
+      const flow = document.querySelector('.flow');
+      return { canScroll: flow.scrollHeight > flow.clientHeight + 1, sh: flow.scrollHeight, ch: flow.clientHeight };
+    });
+    check(`${label}: scroll container is bounded`, m.ch < m.sh || m.sh === m.ch,
+      `scrollHeight=${m.sh} clientHeight=${m.ch}`);
+    if (m.canScroll) {
+      const before = (await sp.locator('.gametile').last().boundingBox()).y;
+      await sp.locator('.flow').evaluate((n) => { n.scrollTop = n.scrollHeight; });
+      await sp.waitForTimeout(200);
+      const after = (await sp.locator('.gametile').last().boundingBox()).y;
+      check(`${label}: scrolling actually moves content`, after < before, `${Math.round(before)} -> ${Math.round(after)}`);
+      check(`${label}: the last item becomes reachable`, after < 667, `y=${Math.round(after)}`);
+    }
+  }
+  await small.close();
+}
 check('pull-to-refresh disabled', shell.overscroll.includes('none'), shell.overscroll);
 check('double-tap zoom off but pinch preserved', shell.touch === 'manipulation', shell.touch);
 

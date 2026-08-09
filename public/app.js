@@ -174,10 +174,10 @@ function render() {
   document.documentElement.dataset.game = state.room?.gameId ?? '';
 }
 
-function shell({ top, body, bottom }) {
-  return el('div', { class: 'screen' }, [
+function shell({ top, body, bottom, variant = '' }) {
+  return el('div', { class: `screen ${variant}` }, [
     top ?? el('div'),
-    el('main', { class: 'flow' }, [el('div', { class: 'shell stack' }, body)]),
+    el('main', { class: 'flow' }, [el('div', { class: `shell stack ${variant}` }, body)]),
     bottom ?? el('div'),
   ]);
 }
@@ -185,43 +185,25 @@ function shell({ top, body, bottom }) {
 // --------------------------------------------------------------------- home --
 
 function homeScreen() {
-  const nameInput = el('input', {
-    class: 'input', id: 'name', maxlength: '14', autocomplete: 'nickname',
-    placeholder: 'Your name (so people know it’s you)', value: state.name,
-    oninput: (e) => { state.name = e.target.value; },
-  });
+  // The code box only accepts the room alphabet, which silently eats anything
+  // else. Someone typing "spyfall" here watched it become "SPYF" and then got
+  // told the room didn't exist -- so match game names too and offer a rescue.
+  const rescue = matchGameByName(state.codeEntry);
+
   const codeInput = el('input', {
-    class: 'input input--code', id: 'code', maxlength: '4', inputmode: 'text',
+    class: 'input input--code', id: 'code', maxlength: '16', inputmode: 'text',
     enterkeyhint: 'go', autocomplete: 'off', autocapitalize: 'characters',
-    autocorrect: 'off', spellcheck: 'false', placeholder: '••••', value: state.codeEntry,
+    autocorrect: 'off', spellcheck: 'false', placeholder: 'ROOM CODE',
+    'aria-label': 'Room code', value: state.codeEntry,
     oninput: (e) => {
-      e.target.value = e.target.value.toUpperCase().replace(/[^BCDFGHJKMNPQRSTVWXYZ]/g, '').slice(0, 4);
-      state.codeEntry = e.target.value;
+      state.codeEntry = e.target.value.toUpperCase().slice(0, 16);
+      e.target.value = state.codeEntry;
+      renderRescue();
     },
     onkeydown: (e) => { if (e.key === 'Enter') doJoin(state.codeEntry, state.name); },
   });
 
-  const tiles = state.games.map((g) =>
-    el('button', {
-      class: `gametile ${state.picked === g.id ? 'is-selected' : ''}`,
-      dataset: { game: g.id },
-      'aria-pressed': String(state.picked === g.id),
-      onclick: () => {
-        state.picked = state.picked === g.id ? null : g.id;
-        render();
-      },
-    }, [
-      icon(g.emblem, 'gametile__emblem'),
-      el('span', { class: 'grow' }, [
-        el('span', { class: 'gametile__name', text: g.name }),
-        // The name people came looking for. Without this, someone hunting for
-        // "Spyfall" scrolls past the game that IS Spyfall.
-        g.familiar && el('span', { class: 'gametile__familiar', text: `Plays like ${g.familiar}` }),
-        el('span', { class: 'gametile__meta', text: `${g.minPlayers}–${g.maxPlayers} players · ${g.lengthMinutes}` }),
-        el('span', { class: 'dim t-sm', style: 'display:block;margin-top:4px', text: g.tagline }),
-      ]),
-    ]),
-  );
+  const tiles = state.games.map((g) => gameTile(g));
 
   return shell({
     top: el('header', { class: 'bar bar--top' }, [
@@ -229,29 +211,132 @@ function homeScreen() {
       themeToggle(),
     ]),
     body: [
-      el('h1', { class: 't-2xl', text: 'Party games for a room full of phones' }),
-      el('p', { class: 'dim t-sm', text: 'No app, no signup. One person starts a room, everyone else types the code.' }),
-      el('div', { class: 'field' }, [el('label', { class: 'label', for: 'name', text: 'Your name' }), nameInput]),
-      el('div', { class: 'field' }, [
-        el('label', { class: 'label', for: 'code', text: 'Joining a room?' }),
+      el('h1', { class: 't-lg', text: 'Party games for a room full of phones' }),
+
+      // Answers "where is Secret Hitler?" without scrolling, and makes the
+      // browser's find-in-page work. Kept to two lines so the games clear the
+      // fold on a 375x667 phone.
+      el('p', { class: 'banner banner--accent t-xs', text:
+        'Spyfall · Werewolf · Secret Hitler · Avalon · Wavelength — all five are below, under our own names.' }),
+
+      // Joining is one compact row, not a titled section: most joiners arrive
+      // on a link and never see this screen at all.
+      el('div', { class: 'joinrow' }, [
         codeInput,
-        el('button', {
-          class: 'btn btn--secondary btn--block',
-          onclick: () => doJoin(state.codeEntry, state.name),
-        }, ['Join room']),
+        el('button', { class: 'btn btn--secondary', onclick: () => doJoin(state.codeEntry, state.name) }, ['Join']),
       ]),
-      el('div', { class: 'label', text: 'Or start a new one' }),
-      el('div', { class: 'gamegrid' }, tiles),
-      state.error && el('div', { class: 'banner banner--danger', text: state.error }),
+      el('div', { id: 'rescue' }, rescue ? [rescueCard(rescue)] : []),
+
+      el('div', { class: 'label', text: 'Pick a game' }),
+      el('div', { class: 'gamegrid', role: 'radiogroup', 'aria-label': 'Pick a game' }, tiles),
+
+      attributionFooter(),
     ],
-    bottom: el('footer', { class: 'bar bar--bottom' }, [
-      el('button', {
-        class: 'btn btn--primary btn--block',
-        disabled: !state.picked || state.busy,
-        onclick: () => doCreate(state.name),
-      }, [state.picked ? `Start ${state.games.find((g) => g.id === state.picked).name}` : 'Pick a game']),
-    ]),
+    // No bar until a game is chosen: a permanently disabled button would steal
+    // ~84px from the screen that most needs the room.
+    bottom: state.picked ? startBar() : null,
+    variant: 'home',
   });
+}
+
+/** Re-render only the rescue slot so typing does not rebuild the whole page. */
+function renderRescue() {
+  const slot = document.getElementById('rescue');
+  if (!slot) return;
+  const match = matchGameByName(state.codeEntry);
+  clear(slot);
+  if (match) slot.append(rescueCard(match));
+}
+
+const ALIASES = {
+  spyfall: 'oddoneout', spy: 'oddoneout',
+  werewolf: 'nightfall', mafia: 'nightfall', wolf: 'nightfall',
+  'secret hitler': 'council', secrethitler: 'council', hitler: 'council',
+  avalon: 'sabotage', resistance: 'sabotage',
+  wavelength: 'spectrum',
+};
+
+/** Does what they typed look like a game rather than a room code? */
+function matchGameByName(raw) {
+  const q = String(raw ?? '').toLowerCase().replace(/[^a-z ]/g, '').trim();
+  if (q.length < 3) return null;
+  const byAlias = ALIASES[q] ?? Object.entries(ALIASES).find(([k]) => k.startsWith(q) || q.startsWith(k))?.[1];
+  const direct = state.games.find(
+    (g) => g.name.toLowerCase().includes(q) || (g.familiar ?? '').toLowerCase().includes(q),
+  );
+  return state.games.find((g) => g.id === byAlias) ?? direct ?? null;
+}
+
+function rescueCard(game) {
+  return el('div', { class: 'card stack stack--tight' }, [
+    el('b', { text: `Looking for ${game.familiar ?? game.name}?` }),
+    el('span', { class: 'dim t-sm', text: `That is ${game.name} here. ${game.minPlayers}–${game.maxPlayers} players, ${game.lengthMinutes}.` }),
+    el('button', {
+      class: 'btn btn--primary btn--block',
+      onclick: () => {
+        state.picked = game.id;
+        state.codeEntry = '';
+        render();
+      },
+    }, [`Pick ${game.name}`]),
+  ]);
+}
+
+function gameTile(g) {
+  const selected = state.picked === g.id;
+  return el('button', {
+    class: `gametile ${selected ? 'is-selected' : ''}`,
+    dataset: { game: g.id },
+    role: 'radio',
+    'aria-checked': String(selected),
+    onclick: () => {
+      state.picked = selected ? null : g.id;
+      render();
+      if (!selected) document.getElementById('startbar-name')?.focus({ preventScroll: true });
+    },
+  }, [
+    icon(g.emblem, 'gametile__emblem'),
+    el('span', { class: 'grow' }, [
+      el('span', { class: 'gametile__name', text: g.name }),
+      // The name people came looking for.
+      g.familiar && el('span', { class: 'gametile__familiar', text: `Plays like ${g.familiar}` }),
+      el('span', { class: 'gametile__meta', text: `${g.minPlayers}–${g.maxPlayers} players · ${g.lengthMinutes}` }),
+      el('span', { class: 'dim t-sm', style: 'display:block;margin-top:4px', text: g.plain ?? g.tagline }),
+    ]),
+  ]);
+}
+
+/** Name and start together, so the field is never off-screen from the button. */
+function startBar() {
+  const game = state.games.find((g) => g.id === state.picked);
+  return el('footer', { class: 'bar bar--bottom' }, [
+    el('input', {
+      class: 'input', id: 'startbar-name', maxlength: '14', autocomplete: 'nickname',
+      enterkeyhint: 'go', placeholder: 'Your name', 'aria-label': 'Your name',
+      value: state.name,
+      oninput: (e) => { state.name = e.target.value; },
+      onkeydown: (e) => { if (e.key === 'Enter') doCreate(state.name); },
+    }),
+    el('button', {
+      class: 'btn btn--primary btn--block',
+      disabled: state.busy,
+      onclick: () => doCreate(state.name),
+    }, [state.busy ? 'Starting…' : `Start ${game.name}`]),
+  ]);
+}
+
+function attributionFooter() {
+  return el('details', { class: 'card', style: 'margin-top:var(--sp-5)' }, [
+    el('summary', { class: 'label', text: 'About these games' }),
+    el('div', { class: 'stack stack--tight', style: 'margin-top:var(--sp-3)' }, [
+      el('p', { class: 'dim t-sm', text:
+        'Parlour is not affiliated with, endorsed by, or licensed by the publishers of the games named here. These are our own implementations, in the spirit of games we love.' }),
+      ...state.games.filter((g) => g.familiar).map((g) =>
+        el('p', { class: 'dim t-sm', text: `${g.name} — in the spirit of ${g.familiar}.` })),
+      el('p', { class: 'dim t-sm', text:
+        'Every location, spectrum pair and word list here was written for this site.' }),
+    ]),
+  ]);
 }
 
 function joinScreen() {
@@ -266,7 +351,6 @@ function joinScreen() {
     body: [
       el('h1', { class: 't-xl', text: `Joining room ${state.code}` }),
       el('div', { class: 'field' }, [el('label', { class: 'label', for: 'name', text: 'Your name' }), nameInput]),
-      state.error && el('div', { class: 'banner banner--danger', text: state.error }),
     ],
     bottom: el('footer', { class: 'bar bar--bottom' }, [
       el('button', {
@@ -298,8 +382,12 @@ function goneScreen() {
 
 async function doCreate(name) {
   if (!name.trim()) {
-    state.error = 'Enter a name first';
-    return render();
+    // A toast is fixed near the top and is announced to screen readers. The old
+    // inline banner rendered below five game tiles, so tapping Start with an
+    // empty name looked like the button simply did nothing.
+    toast('Add your name first — the box just above this button.');
+    document.getElementById('startbar-name')?.focus();
+    return;
   }
   state.busy = true;
   unlockAudio();
@@ -311,7 +399,7 @@ async function doCreate(name) {
     history.pushState({}, '', `/${res.code}`);
     await join(res.code, res);
   } catch (err) {
-    state.error = humanError(err.code);
+    toast(humanError(err.code));
   } finally {
     state.busy = false;
     render();
@@ -321,12 +409,19 @@ async function doCreate(name) {
 async function doJoin(code, name) {
   const clean = String(code ?? '').toUpperCase().replace(/[^BCDFGHJKMNPQRSTVWXYZ]/g, '');
   if (clean.length !== 4) {
-    state.error = 'Room codes are 4 letters';
-    return render();
+    const match = matchGameByName(code);
+    toast(match
+      ? `That is a game, not a room code. ${match.name} is in the list below.`
+      : 'Room codes are 4 letters, no vowels.');
+    return;
   }
   if (!name.trim()) {
-    state.error = 'Enter a name first';
-    return render();
+    state.name = '';
+    state.screen = 'join';
+    state.code = clean;
+    render();
+    toast('Add your name to join.');
+    return;
   }
   state.busy = true;
   unlockAudio();
@@ -338,7 +433,7 @@ async function doJoin(code, name) {
     history.pushState({}, '', `/${clean}`);
     await join(clean, res);
   } catch (err) {
-    state.error = humanError(err.code);
+    toast(humanError(err.code));
   } finally {
     state.busy = false;
     render();

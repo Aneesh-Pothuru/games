@@ -200,6 +200,13 @@ body {
   touch-action: manipulation;
 }
 
+/* Load-bearing. Without an explicit height here, `.screen { height: 100% }`
+   resolves against an auto-height parent and collapses to content height, so
+   the .flow scroll container ends up exactly as tall as its content and never
+   scrolls — while body's overflow:hidden silently clips everything past the
+   fold. That made every screen taller than the viewport unreachable. */
+#app { height: 100%; }
+
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; touch-action: manipulation; }
 /* Never below 16px computed or iOS Safari zooms the viewport on focus. */
@@ -700,10 +707,28 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 .gametile__meta { display: block; font-size: var(--t-xs); color: var(--text-3); margin-top: 2px; }
 /* The recognisable name. Deliberately high-contrast and directly under the
    title -- it is what most people scan for. */
+/* One step below the game name, accent-coloured: this is the line most people
+   actually scan for, so it must not be the smallest text on the tile. */
 .gametile__familiar {
-  display: inline-block; margin-top: 3px;
-  font-size: var(--t-xs); font-weight: 700; color: var(--game-accent);
+  display: block; margin-top: 3px;
+  font-size: var(--t-sm); font-weight: 700; color: var(--game-accent);
 }
+
+/* Join collapses to a single row so the game list clears the fold. */
+/* Tighter rhythm on the home screen only: every 16px here pushes the game
+   list further below the fold on a small phone. */
+.home.stack { gap: var(--sp-3); }
+.home .flow { padding-top: var(--sp-4); }
+.joinrow { display: flex; gap: var(--sp-2); align-items: stretch; }
+.joinrow .input--code {
+  flex: 1; min-height: var(--tap); font-size: 1.35rem; letter-spacing: 0.2em;
+  text-indent: 0.2em; min-width: 0;
+}
+.joinrow .btn { flex: 0 0 auto; padding-inline: var(--sp-4); }
+
+/* The start bar carries the name field and the button together, so the field is
+   never scrolled away from the action that needs it. */
+.bar--bottom .input { margin-bottom: var(--sp-2); }
 
 .secret {
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);

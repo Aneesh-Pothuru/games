@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The rules engines are pure functions with no I/O, so these need
+      # nothing beyond Node itself.
+      - name: Rules engine tests
+        run: npm test
+
+      - name: Start the Worker
+        run: |
+          npx wrangler dev --port 8787 > /tmp/wrangler.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -sf -o /dev/null http://localhost:8787/api/games; then
+              echo "worker ready"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "worker failed to start"
+          cat /tmp/wrangler.log
+          exit 1
+
+      - name: Protocol tests against a live Durable Object
+        run: npm run test:protocol
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Browser tests on phone viewports
+        run: npm run test:browser
+
+      - name: Worker log on failure
+        if: failure()
+        run: cat /tmp/wrangler.log || true

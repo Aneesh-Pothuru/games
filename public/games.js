@@ -2034,7 +2034,10 @@ function feedback(ctx, v) {
   if (!g) return null;
   const lesson = g.lesson;
 
-  return el('section', { class: `labfeed ${GRADE_TONE[g.grade] ?? ''}`, 'data-teach': '' }, [
+  return el('section', {
+    class: `labfeed ${GRADE_TONE[g.grade] ?? ''} ${v.awaiting ? 'is-held' : ''}`,
+    'data-teach': '',
+  }, [
     el('div', { class: 'labfeed__head' }, [
       el('b', { class: 'labfeed__grade', text: g.label }),
       g.evLoss > 0.005
@@ -2228,6 +2231,12 @@ const pokerlab = {
         }, ['Their cards']) : null,
       ].filter(Boolean))]);
     }
+    // The table is held on your feedback. One button, and it is the only way
+    // forward — the bots do not act and the street does not turn until you
+    // have said you read it.
+    if (v.awaiting) {
+      return bottom([primary('Got it', { onclick: () => ctx.send({ type: 'ack' }) })]);
+    }
     if (!v.myTurn) return waitingBar(v.actor ? `${ctx.nameOf(ctx, v.actor)} is thinking…` : 'Dealing…');
     return holdem.bottom(ctx);
   },
@@ -2247,6 +2256,14 @@ const pokerlab = {
         el('button', {
           'aria-pressed': String(ctx.room.config.coach === val),
           onclick: () => set({ coach: val }),
+        }, [l]))),
+    ]),
+    el('div', { class: 'optionrow' }, [
+      el('span', { text: 'Pause on' }),
+      el('div', { class: 'seg' }, [['always', 'Every hand'], ['mistakes', 'Mistakes'], ['never', 'Never']].map(([val, l]) =>
+        el('button', {
+          'aria-pressed': String((ctx.room.config.pause ?? 'always') === val),
+          onclick: () => set({ pause: val }),
         }, [l]))),
     ]),
     el('p', { class: 'optionnote', text: ctx.room.config.coach === 'guided'

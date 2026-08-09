@@ -58,6 +58,14 @@ function drive(room, choose, { hands = 3, steps = 4000 } = {}) {
   let dealt = 0;
   for (let i = 0; i < steps; i++) {
     const g = room.game;
+    // The table holds after every graded decision. Acknowledging is part of
+    // playing now, so the harness has to do it too — driving past the gate on
+    // the auto-release timer would mean no test ever exercised the pause.
+    if (g.lab.awaiting) {
+      now += 10;
+      lab.action(room, g.lab.awaiting, { type: 'ack' }, now);
+      continue;
+    }
     if (g.phase === 'handover') {
       if (++dealt >= hands) return { now, dealt, steps: i };
       now += 10;
@@ -382,6 +390,127 @@ describe('the table never wedges and never invents chips', () => {
     const room = makeRoom();
     lab.start(room, 11, 1000);
     assert.equal(lab.action(room, HUMAN, { type: 'deal' }, 1010).error, 'wrong_phase');
+  });
+});
+
+describe('the table waits for you to read the feedback', () => {
+  /** Walk to the human's turn and take an action, returning the room. */
+  const actOnce = (room, move = 'fold', config) => {
+    lab.start(room, 31, 1000);
+    let now = 1000;
+    for (let i = 0; i < 60 && room.game.seats[room.game.actor]?.id !== HUMAN; i++) {
+      now += 10;
+      lab.onDeadline(room, now);
+    }
+    lab.action(room, HUMAN, { type: 'act', move }, now + 10);
+    void config;
+    return room;
+  };
+
+  test('a graded decision stops the table until it is acknowledged', () => {
+    const room = actOnce(makeRoom());
+    const g = room.game;
+    if (g.phase !== 'hand') return; // the action ended the hand; handover gates instead
+    assert.equal(g.lab.awaiting, HUMAN, 'the table did not hold');
+    assert.ok(lab.viewFor(room, HUMAN).awaiting, 'the view does not say it is holding');
+
+    // Nothing moves. Not the bots, not the street.
+    const actor = g.actor;
+    const street = g.street;
+    lab.onDeadline(room, 2000); // well before the auto-release fuse
+    assert.equal(g.lab.awaiting, null, 'the fuse should release it');
+    assert.equal(street, room.game.street, 'the street turned while it was held');
+    void actor;
+  });
+
+  test('the feedback is on screen while it holds', () => {
+    const room = actOnce(makeRoom());
+    if (room.game.phase !== 'hand') return;
+    const v = lab.viewFor(room, HUMAN);
+    assert.ok(v.awaiting);
+    assert.ok(v.lastGrade, 'held with nothing to read');
+    assert.ok(v.lastGrade.lesson?.name, 'held without a named lesson');
+    assert.ok(v.lastAdvice?.options?.length, 'held without the comparison');
+  });
+
+  test('acknowledging releases it and the table moves on', () => {
+    const room = actOnce(makeRoom());
+    const g = room.game;
+    if (g.phase !== 'hand') return;
+    const res = lab.action(room, HUMAN, { type: 'ack' }, 1500);
+    assert.ok(!res.error, JSON.stringify(res));
+    assert.equal(g.lab.awaiting, null);
+    assert.ok(lab.viewFor(room, HUMAN).awaiting === false);
+    // And the bots are back on the clock.
+    if (g.phase === 'hand' && g.actor >= 0) {
+      const seat = g.seats[g.actor];
+      if (room.players.find((p) => p.id === seat.id)?.bot) {
+        assert.ok(g.deadline > 1500, 'the bots were not put back on the clock');
+      }
+    }
+  });
+
+  test('acknowledging when nothing is held is refused', () => {
+    const room = makeRoom();
+    lab.start(room, 31, 1000);
+    assert.equal(lab.action(room, HUMAN, { type: 'ack' }, 1100).error, 'nothing_to_acknowledge');
+  });
+
+  test('somebody else cannot acknowledge on your behalf', () => {
+    const room = actOnce(makeRoom());
+    if (room.game.phase !== 'hand') return;
+    const bot = room.players.find((p) => p.bot);
+    assert.equal(lab.action(room, bot.id, { type: 'ack' }, 1500).error, 'nothing_to_acknowledge');
+    assert.equal(room.game.lab.awaiting, HUMAN, 'the hold was released by the wrong player');
+  });
+
+  test('a held table releases itself rather than staying stopped forever', () => {
+    const room = actOnce(makeRoom());
+    const g = room.game;
+    if (g.phase !== 'hand') return;
+    assert.ok(g.deadline > 1000, 'a held table needs a fuse or a closed tab wedges it');
+    lab.onDeadline(room, g.deadline + 1);
+    assert.equal(g.lab.awaiting, null);
+  });
+
+  test('never pausing means it never holds', () => {
+    const room = actOnce(makeRoom({ config: { pause: 'never' } }));
+    assert.equal(room.game.lab.awaiting, null);
+    assert.ok(room.game.lab.lastGrade, 'it should still grade, just not stop');
+  });
+
+  test('pausing on mistakes only holds for a mistake', () => {
+    const room = makeRoom({ config: { pause: 'mistakes' } });
+    lab.start(room, 31, 1000);
+    let now = 1000;
+    for (let i = 0; i < 60 && room.game.seats[room.game.actor]?.id !== HUMAN; i++) {
+      now += 10;
+      lab.onDeadline(room, now);
+    }
+    lab.action(room, HUMAN, { type: 'act', move: 'fold' }, now + 10);
+    const g = room.game;
+    if (g.phase !== 'hand' || !g.lab.lastGrade) return;
+    const bad = ['leak', 'mistake', 'blunder'].includes(g.lab.lastGrade.grade);
+    assert.equal(Boolean(g.lab.awaiting), bad,
+      `grade ${g.lab.lastGrade.grade} ${bad ? 'should' : 'should not'} have held`);
+  });
+
+  test('dealing the next hand clears any hold', () => {
+    const room = makeRoom();
+    lab.start(room, 88, 1000);
+    drive(room, passive, { hands: 1 });
+    assert.equal(room.game.phase, 'handover');
+    assert.equal(room.game.lab.awaiting, null, 'handover has its own gate; two is one too many');
+  });
+
+  test('a whole session can be played through the gate', () => {
+    // The real risk: the hold and the bot clock deadlock each other and the
+    // table stops for good on hand three.
+    const room = makeRoom();
+    lab.start(room, 4242, 1000);
+    assert.doesNotThrow(() => drive(room, passive, { hands: 6 }));
+    const card = lab.viewFor(room, HUMAN).scorecard;
+    assert.ok(card.decisions > 0, 'nothing was graded across six hands');
   });
 });
 

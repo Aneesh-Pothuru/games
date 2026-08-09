@@ -1429,6 +1429,11 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 
 /* A text button that reads as a link, not as a slab. Full 48px hit area from
    padding; the ink is 15px. */
+/* A held table. The accent rail thickens and the block gets a rim, so it is
+   visibly the thing the one button on screen refers to. */
+.labfeed.is-held {
+  box-shadow: inset 0 0 0 var(--hair) var(--tone), inset 4px 0 0 var(--tone);
+}
 .labover { display: flex; gap: var(--sp-2); width: 100%; align-items: stretch; }
 .labover .btn--primary { flex: 1 1 auto; }
 /* Small ink, full hit box: the visible control is 15px of text, the target is

@@ -59,11 +59,30 @@ export const meta = {
  */
 export const COACH_MODES = ['learn', 'guided', 'off'];
 
+/**
+ * When the table holds still for you.
+ *
+ * Feedback that scrolls past while the next card is being dealt is feedback
+ * nobody read. So after a graded decision the table STOPS and waits for you to
+ * acknowledge the coaching before anything else happens — the bots do not act,
+ * the street does not turn, nothing moves until you have seen it.
+ *
+ * `mistakes` exists because acknowledging forty correct decisions in a session
+ * is friction with no lesson in it, and friction is what makes people stop
+ * practising. It is not the default: you asked to be stopped, and being
+ * stopped on a decision you got right is where you find out WHY it was right.
+ */
+export const PAUSE_MODES = ['always', 'mistakes', 'never'];
+
+/** Grades that count as "worth stopping for" under `mistakes`. */
+const WORTH_STOPPING = new Set(['leak', 'mistake', 'blunder']);
+
 export const defaultConfig = {
   startingStack: 2000,
   actionSeconds: 0, // no clock: this is practice, thinking is the point
   table: 'mixed',
   coach: 'learn',
+  pause: 'always',
 };
 
 export function normalizeConfig(config) {
@@ -78,12 +97,14 @@ export function normalizeConfig(config) {
       COACH_MODES,
       'learn',
     ),
+    pause: oneOf(config.pause, PAUSE_MODES, 'always'),
   };
 }
 
 /** Bot pacing. Long enough to read the table, short enough not to wait on it. */
 const BOT_THINK_MS = 900;
 const HANDOVER_MS = 60_000; // you deal the next hand when you are ready
+const ACK_MS = 180_000;     // a held table releases itself after three minutes
 
 const TABLES = {
   mixed: ['mercy', 'kaz', 'rocky'],
@@ -135,6 +156,9 @@ export function start(room, seed, now) {
     // moment you have committed, not that they never arrive.
     lastAdvice: null,
     lastGrade: null,
+    // Who the table is waiting on to acknowledge their feedback. While this is
+    // set, nothing advances — not the bots, not the street, not the deal.
+    awaiting: null,
     // Held back until the hand is over, so the runout never colours the grade.
     pending: [],
     revealBots: false,
@@ -263,16 +287,31 @@ export function action(room, playerId, act, now) {
 
     g.lab.lastGrade = graded;
     g.lab.lastAdvice = graded ? advice : null;
+    // Hold the table. Only mid-hand: when the action ends the hand there is
+    // already a "Next hand" gate on the handover screen, and making somebody
+    // tap twice to get past one piece of feedback is not more teaching, it is
+    // just another tap.
+    if (graded && g.phase === 'hand' && shouldPause(room, graded)) {
+      g.lab.awaiting = playerId;
+    }
     return afterAnyAction(room, now, outcome);
   }
 
   if (act.type === 'deal') {
     if (g.phase !== 'handover') return { error: 'wrong_phase' };
+    g.lab.awaiting = null;
     g.lab.revealBots = false;
     g.lab.lastGrade = null;
     g.lab.lastAdvice = null;
     const outcome = holdem.action(room, playerId, act, now) ?? {};
     return afterAnyAction(room, now, outcome);
+  }
+
+  // "I have read it." The only thing that releases a held table.
+  if (act.type === 'ack') {
+    if (g.lab.awaiting !== playerId) return { error: 'nothing_to_acknowledge' };
+    g.lab.awaiting = null;
+    return afterAnyAction(room, now, {});
   }
 
   // The runout is deliberately hidden until you ask for it, so the grade
@@ -289,8 +328,23 @@ export function action(room, playerId, act, now) {
  * Bots act on the alarm rather than inside this call, so the table paces
  * itself and you watch each decision land instead of seeing four at once.
  */
+/** Is this grade worth stopping the table for? */
+function shouldPause(room, graded) {
+  const mode = room.config.pause ?? 'always';
+  if (mode === 'never') return false;
+  if (mode === 'mistakes') return WORTH_STOPPING.has(graded.grade);
+  return true;
+}
+
 function scheduleNext(room, now) {
   const g = room.game;
+  if (g.lab.awaiting) {
+    // Held. A long fuse rather than no clock at all, so a closed tab releases
+    // the table eventually instead of leaving it stopped forever — but long
+    // enough that reading the feedback is never a race.
+    g.deadline = now + ACK_MS;
+    return;
+  }
   if (g.phase === 'hand' && g.actor >= 0 && isBot(room, g.seats[g.actor].id)) {
     g.deadline = now + BOT_THINK_MS;
   } else if (g.phase === 'handover') {
@@ -311,6 +365,12 @@ function afterAnyAction(room, now, outcome) {
 
 export function onDeadline(room, now) {
   const g = room.game;
+
+  // Nobody acknowledged. Release rather than stay stopped forever.
+  if (g.lab.awaiting) {
+    g.lab.awaiting = null;
+    return afterAnyAction(room, now, {});
+  }
 
   if (g.phase === 'handover') {
     // Nobody dealt for a full minute; deal anyway so the table never stalls.
@@ -410,6 +470,15 @@ export function viewFor(room, viewerId) {
       ? forMode(lab.advice, room.config.coach)
       : null,
     coach: room.config.coach,
+    pause: room.config.pause,
+    // No visible clock while the table is held. The fuse exists so a closed
+    // tab cannot stop the room forever; showing it as a countdown would turn
+    // "read this" into "read this quickly", which is the opposite of the
+    // point — a trainer that times you out is teaching you to guess.
+    deadline: lab.awaiting ? null : base.deadline,
+    // The table is stopped, waiting on YOU. The client turns this into the
+    // one button on screen.
+    awaiting: lab.awaiting === viewerId,
     lastGrade: lab.lastGrade,
     lastAdvice: lab.lastAdvice,
     revealed: lab.revealBots,

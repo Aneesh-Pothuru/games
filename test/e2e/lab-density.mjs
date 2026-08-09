@@ -125,6 +125,14 @@ for (const [label, device] of widths) {
   // --- the feedback moment ---
   for (let step = 0; step < 150; step++) {
     if (/Next hand/i.test(await page.locator('.bar--bottom').innerText().catch(() => ''))) break;
+    // The table holds after every graded decision. Acknowledging is part of
+    // playing the game now.
+    const ack = page.locator('.bar--bottom .btn--primary', { hasText: /^Got it$/ });
+    if (await ack.count()) {
+      await ack.click().catch(() => {});
+      await page.waitForTimeout(120);
+      continue;
+    }
     const primary = page.locator('.pokeract .btn--primary');
     if (await primary.count()) {
       await primary.click().catch(() => {});

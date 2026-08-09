@@ -129,7 +129,35 @@ if (await actBar.count()) {
     JSON.stringify(boxes.map((b) => Math.round(b.height))));
 
   await actBar.locator('.btn--primary').click();
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(900);
+
+  // THE GATE. After a graded decision the table stops: the coaching is on
+  // screen and the only control is the one that says you have read it.
+  const held = page.locator('.labfeed.is-held');
+  const gotIt = page.locator('.bar--bottom .btn--primary', { hasText: /^Got it$/ });
+  const gated = (await gotIt.count()) === 1;
+  if (gated) {
+    check('the table holds until you acknowledge the coaching', true);
+    check('and the feedback is what it is holding on', (await held.count()) === 1);
+    check('with no way to act past it', (await page.locator('.pokeract').count()) === 0);
+    const box = await gotIt.boundingBox();
+    check('the acknowledgement is thumb-sized', (box?.height ?? 0) >= 44, JSON.stringify(box));
+    // No countdown while it holds. A visible clock turns "read this" into
+    // "read this quickly", which is exactly what a trainer must not do.
+    check('and there is no clock running against you',
+      (await page.locator('.timer, [class*="timer"]').count()) === 0,
+      await page.locator('.bar--top').innerText().catch(() => ''));
+    await page.screenshot({ path: `${OUT}/46-lab-held.png` });
+    await gotIt.click();
+    await page.waitForTimeout(700);
+    check('acknowledging lets the table move on',
+      (await page.locator('.bar--bottom .btn--primary', { hasText: /^Got it$/ }).count()) === 0);
+  } else {
+    // The action ended the hand, so the handover gate applies instead. Either
+    // way the table stopped — but say which happened rather than pass quietly.
+    check('the hand ended, so the handover gate applies instead',
+      /Next hand/i.test(await page.locator('.bar--bottom').innerText().catch(() => '')));
+  }
 }
 
 // Play on until the hand ends, always taking the cheapest legal action.
@@ -138,6 +166,14 @@ for (let step = 0; step < 120; step++) {
   if (/Next hand/i.test(await page.locator('.bar--bottom').innerText().catch(() => ''))) {
     handover = true;
     break;
+  }
+  // The table holds after every graded decision. Acknowledging is part of
+  // playing the game now.
+  const ack = page.locator('.bar--bottom .btn--primary', { hasText: /^Got it$/ });
+  if (await ack.count()) {
+    await ack.click().catch(() => {});
+    await page.waitForTimeout(120);
+    continue;
   }
   const primary = page.locator('.pokeract .btn--primary');
   if (await primary.count()) {

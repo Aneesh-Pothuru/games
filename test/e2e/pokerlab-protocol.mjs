@@ -129,9 +129,32 @@ if (dealt) {
   // Nobody else is here to press anything. If the table ever sits on a bot's
   // turn without advancing, the game is over for the player — and on the edge
   // this is a genuine Durable Object alarm, not a local emulation of one.
-  const advised = await seen((f) => f.view?.advice, 45_000);
+  // Deal until the human actually gets a decision.
+  //
+  // Not every hand gives you one: if all three bots fold to your big blind you
+  // win the blinds without acting, and the hand is over before any advice
+  // exists. Waiting on a single hand made this suite fail roughly one run in
+  // five, and it failed with "the table stalled on a bot", which is a
+  // completely different and much more alarming bug than the one that was
+  // happening.
+  let advised = null;
+  for (let hand = 0; hand < 8 && !advised; hand++) {
+    const seenBefore = frames.length;
+    const next = await Promise.race([
+      seen((f, i) => i >= seenBefore && f.view?.advice, 45_000),
+      seen((f, i) => i >= seenBefore && f.view?.phase === 'handover', 45_000),
+    ]);
+    if (!next) break;
+    if (next.view.advice) {
+      advised = next;
+      break;
+    }
+    // Nobody gave us a decision that hand. Deal the next one.
+    ws.send(JSON.stringify({ t: 'action', action: { type: 'deal' } }));
+    await new Promise((r) => setTimeout(r, 400));
+  }
   check('the bots act on their own and the action reaches you', Boolean(advised),
-    'no advice frame arrived within 45s — the table stalled on a bot');
+    'no decision reached the human in eight hands — the table stalled on a bot');
 
   if (advised) {
     const a = advised.view.advice;

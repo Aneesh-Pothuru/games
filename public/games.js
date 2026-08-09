@@ -1921,78 +1921,237 @@ const cheat = {
   ],
 };
 
-
 // ---------------------------------------------------------------- pokerlab --
 
 /**
- * The coach panel.
+ * THE LAB — the teaching screens.
  *
- * Two rules it never breaks. Estimates are labelled as estimates — equity
- * carries its error bar and pot odds do not, because one is a sample and the
- * other is arithmetic. And when two lines are worth the same it says so
- * instead of picking one, because inventing a winner teaches a certainty the
- * maths does not support.
+ * The first version of this put six statistics, seven type sizes and 168 words
+ * on one decision, spread over three screens, with the coaching entirely below
+ * the fold. Everything below is a reaction to a specific finding about why
+ * that fails to teach:
+ *
+ *   COMMIT FIRST. In `learn` mode nothing is on screen while you decide except
+ *   what exists at a real table. Feedback reliably helps only when the learner
+ *   attempted the problem first; shown the answer beforehand, the task becomes
+ *   "read a dashboard", which is a different skill and is absent from the
+ *   table you are training for. The server does not even send the numbers.
+ *
+ *   THE LABEL BEFORE THE NUMBER. A grade and an explanation shown together
+ *   get the grade read and the explanation ignored, so the verdict leads, the
+ *   reasoning follows, and the arithmetic waits behind one tap.
+ *
+ *   FOUR THINGS, NOT SIX. Working memory holds about four novel elements. The
+ *   feedback screen shows a verdict, a comparison, a lesson, and nothing else
+ *   until asked.
+ *
+ *   TWO LEVELS OF DISCLOSURE, NEVER THREE. Screen, then one expansion. Past
+ *   that people lose track of where they are.
  */
-function coachPanel(ctx, a) {
-  if (!a) return null;
-  const best = a.best;
-  return el('details', { class: 'coach', open: true }, [
-    el('summary', { class: 'coach__head' }, [
-      el('span', { class: 'label', text: 'Coach' }),
-      el('b', {
-        class: 'coach__call',
-        text: a.mixed
-          ? `${a.mixed.join(' or ')} — same value`
-          : `${best.move}${best.to ? ` to ${chips(best.to)}` : ''}`,
-      }),
-    ]),
-    el('div', { class: 'coach__body' }, [
-      el('div', { class: 'coach__grid' }, a.facts.map((f) => el('div', { class: 'coach__fact' }, [
-        el('span', { class: 'label', text: f.label }),
-        el('b', { class: `coach__val ${f.exact ? '' : 'is-estimate'}`, text: f.value }),
-        el('span', { class: 'dim t-2xs', text: f.detail }),
-      ]))),
-      ...a.warnings.map((w) => el('div', { class: 'banner banner--danger t-xs', text: w })),
-      el('div', { class: 'label', text: 'What each line is worth' }),
-      el('ul', { class: 'coach__opts' }, a.options.map((o) => el('li', {
-        class: `coach__opt ${o.move === best.move ? 'is-best' : ''}`,
-      }, [
-        el('b', { text: `${o.move}${o.to ? ` ${chips(o.to)}` : ''}` }),
-        el('span', { class: 'coach__ev num', text: `${o.ev >= 0 ? '+' : ''}${o.ev.toFixed(2)}bb` }),
-        el('span', { class: 'dim t-2xs', text: o.why }),
-      ]))),
-    ]),
-  ]);
-}
 
-function gradeBanner(g) {
-  if (!g) return null;
-  const tone = g.grade === 'solid' ? 'banner--good'
-    : g.grade === 'blunder' ? 'banner--danger' : '';
-  return el('div', { class: `banner ${tone} stack stack--tight` }, [
-    el('b', { text: g.indifferent ? 'Either was fine' : `${g.label}${g.evLoss > 0.005 ? ` — ${g.evLoss.toFixed(2)}bb` : ''}` }),
-    el('span', { class: 'dim t-sm', text: g.why }),
+/** Grade → tone. Colour is never the only channel; every band has a word. */
+const GRADE_TONE = {
+  optimal: 'is-optimal',
+  fine: 'is-fine',
+  leak: 'is-leak',
+  mistake: 'is-mistake',
+  blunder: 'is-blunder',
+};
+
+/**
+ * The one thing on screen while you decide, in learn mode.
+ *
+ * It names the idea being tested and nothing else. That is the "where am I
+ * going" half of feedback, it costs nothing pedagogically because it does not
+ * contain the answer, and without it a student cannot tell what they were
+ * supposed to be thinking about.
+ */
+function drillPrompt(a) {
+  if (!a?.lesson) return null;
+  return el('div', { class: 'labprompt', 'data-teach': '' }, [
+    el('span', { class: 'labprompt__eyebrow', text: 'This decision' }),
+    el('b', { class: 'labprompt__name', text: a.lesson.name }),
   ]);
 }
 
 /**
- * The running score.
+ * The hero number, in guided mode only.
  *
- * Under twenty decisions this shows the running TOTAL, not the per-100 rate.
- * One blunder in your first five decisions extrapolates to "87bb lost per
- * 100", which is a statement about arithmetic rather than about your poker,
- * and a student who sees it either panics or stops believing the number.
+ * Exactly one. The runner-up numbers are what turned the old panel into a
+ * dashboard, and they are all still available after you act.
  */
-function scoreStrip(s) {
-  if (!s || !s.decisions) return null;
-  return el('div', { class: 'row' }, [
-    el('span', { class: 'label grow', text: `${s.decisions} decision${s.decisions === 1 ? '' : 's'}` }),
+function guidedHero(a) {
+  if (!a?.lesson?.metric) return null;
+  const m = a.lesson.metric;
+  return el('div', { class: 'labhero', 'data-teach': '' }, [
+    el('b', { class: `labhero__val ${m.exact ? '' : 'is-estimate'}`, text: m.value }),
+    el('span', { class: 'labhero__label', text: m.label }),
+    el('p', { class: 'labhero__point', text: a.lesson.point }),
+  ]);
+}
+
+/**
+ * One horizontal bar per line you could have taken.
+ *
+ * Not a stacked bar and not a gauge: length from a common baseline is the only
+ * encoding people compare accurately at a glance. Your choice is filled, the
+ * best line carries a marker, and the numbers are right-aligned and tabular so
+ * they form a column you can read down.
+ */
+function lineBars(options, chosen, best) {
+  const evs = options.map((o) => o.ev);
+  const lo = Math.min(0, ...evs);
+  const hi = Math.max(0, ...evs);
+  const span = hi - lo || 1;
+  const zero = ((0 - lo) / span) * 100;
+
+  return el('ul', { class: 'labbars' }, options.map((o) => {
+    const x = ((o.ev - lo) / span) * 100;
+    const from = Math.min(zero, x);
+    const width = Math.max(1.5, Math.abs(x - zero));
+    return el('li', {
+      class: `labbar ${o.move === chosen ? 'is-chosen' : ''} ${o.move === best ? 'is-best' : ''}`,
+    }, [
+      el('span', { class: 'labbar__name', text: o.move + (o.to ? ` ${chips(o.to)}` : '') }),
+      el('span', { class: 'labbar__track' }, [
+        el('span', { class: 'labbar__fill', style: `left:${from}%;width:${width}%` }),
+        el('span', { class: 'labbar__zero', style: `left:${zero}%` }),
+      ]),
+      el('span', { class: 'labbar__ev', text: `${o.ev >= 0 ? '+' : ''}${o.ev.toFixed(2)}` }),
+    ]);
+  }));
+}
+
+/**
+ * The feedback moment.
+ *
+ * Verdict, then the comparison, then the lesson. The arithmetic — every number
+ * the old panel showed at once — lives in one collapsed row underneath, which
+ * is the second and last level of disclosure.
+ */
+function feedback(ctx, v) {
+  const g = v.lastGrade;
+  if (!g) return null;
+  const lesson = g.lesson;
+
+  return el('section', { class: `labfeed ${GRADE_TONE[g.grade] ?? ''}`, 'data-teach': '' }, [
+    el('div', { class: 'labfeed__head' }, [
+      el('b', { class: 'labfeed__grade', text: g.label }),
+      g.evLoss > 0.005
+        ? el('span', { class: 'labfeed__cost', text: `−${g.evLoss.toFixed(2)}bb` })
+        : null,
+    ].filter(Boolean)),
+    el('p', { class: 'labfeed__verdict', text: g.verdict }),
+
+    // Verdict, then WHY, then the evidence. The reasoning has to land before
+    // the numbers do — a grade and an explanation shown together get the grade
+    // read and the explanation skipped, and the explanation is the part that
+    // is still worth something next week.
+    lesson ? el('p', { class: 'lablesson__point', text: lesson.point }) : null,
+
+    v.lastAdvice?.options?.length
+      ? lineBars(v.lastAdvice.options, g.chosen, g.best)
+      : null,
+
+    lesson ? el('div', { class: 'lablesson' }, [
+      el('span', { class: 'lablesson__tag', text: lesson.name }),
+      el('p', { class: 'lablesson__rule', text: lesson.rule }),
+    ]) : null,
+
+    // Level two of two. Everything numeric that used to compete for attention.
+    v.lastAdvice?.facts?.length ? el('details', { class: 'labmore' }, [
+      el('summary', { class: 'labmore__sum', text: 'Show the numbers' }),
+      el('div', { class: 'labmore__body' }, [
+        ...v.lastAdvice.facts.map((f) => el('div', { class: 'labfact' }, [
+          el('span', { class: 'labfact__label', text: f.label }),
+          el('b', { class: `labfact__val ${f.exact ? '' : 'is-estimate'}`, text: f.value }),
+          el('span', { class: 'labfact__detail', text: f.detail }),
+        ])),
+        ...(v.lastAdvice.warnings ?? []).map((w) => el('p', { class: 'labfact__warn', text: w })),
+        lesson ? el('p', { class: 'labfact__why', text: lesson.why }) : null,
+      ].filter(Boolean)),
+    ]) : null,
+  ].filter(Boolean));
+}
+
+/** Progress: one line, and it never extrapolates a rate out of five decisions. */
+function progressStrip(v) {
+  const s = v.scorecard;
+  const c = v.course;
+  if (!s?.decisions) return null;
+  return el('div', { class: 'labstrip' }, [
+    el('span', { class: 'labstrip__n', text: `${s.decisions} decision${s.decisions === 1 ? '' : 's'}` }),
+    el('span', { class: 'labstrip__sep', text: '·' }),
     el('span', {
-      class: 'label',
-      text: s.rateable
-        ? `${s.evLossPer100.toFixed(1)}bb lost / 100`
-        : `${s.evLoss.toFixed(2)}bb lost so far`,
+      class: 'labstrip__v',
+      text: s.rateable ? `${s.evLossPer100.toFixed(1)}bb / 100` : `${s.evLoss.toFixed(2)}bb lost`,
     }),
+    c?.next ? el('span', { class: 'labstrip__next', text: `Next: ${c.next.name}` }) : null,
+  ].filter(Boolean));
+}
+
+/**
+ * The course.
+ *
+ * Named ideas with a mastery band each, grouped by stage. Improvement areas
+ * are phrased as areas, never as a verdict on the person — feedback that
+ * points at the self rather than the task is the documented way to make
+ * somebody worse at a thing.
+ */
+function courseSheet(v) {
+  const c = v.course;
+  if (!c) return null;
+  return el('div', { class: 'stack' }, [
+    c.next ? el('div', { class: 'labnext' }, [
+      el('span', { class: 'labnext__eyebrow', text: 'Work on next' }),
+      el('b', { class: 'labnext__name', text: c.next.name }),
+      el('p', { class: 'labnext__idea', text: c.next.idea }),
+      el('p', { class: 'labnext__rule', text: c.next.rule }),
+    ]) : null,
+    ...c.stages.map((st) => el('div', { class: 'labstage' }, [
+      el('div', { class: 'labstage__head' }, [
+        el('b', { text: st.name }),
+        el('span', { class: 'labstage__count', text: `${st.solid}/${st.total}` }),
+      ]),
+      el('p', { class: 'labstage__blurb', text: st.blurb }),
+      el('ul', { class: 'labskills' }, c.rows.filter((r) => r.stage === st.id).map((r) =>
+        el('li', { class: `labskill is-${r.band.id}` }, [
+          el('span', { class: 'labskill__name', text: r.name }),
+          el('span', { class: 'labskill__band', text: r.band.label }),
+          el('span', { class: 'labskill__meter' }, [
+            el('span', {
+              class: 'labskill__fill',
+              style: `width:${Math.round((r.score ?? 0) * 100)}%`,
+            }),
+          ]),
+        ]))),
+    ])),
+  ].filter(Boolean));
+}
+
+/**
+ * Your cards, and the one line worth putting beside them.
+ *
+ * The shared hold'em row falls back to "Waiting for the flop", which preflop
+ * is both the largest text on the screen and the least informative — it names
+ * the thing that has not happened rather than the thing you are deciding.
+ */
+function labHand(ctx, v) {
+  const me = v.seats.find((s) => s.id === ctx.me);
+  if (!me?.hole?.length) return myCards(ctx, v);
+  const best = new Set(me.best ?? []);
+  const facing = v.legal?.callAmount > 0 ? `${chips(v.legal.callAmount)} to call` : null;
+  const line = me.folded
+    ? 'Folded'
+    : v.myHand || [v.myPosition, facing].filter(Boolean).join(' · ') || 'Your hand';
+
+  return el('div', { class: `pokerhand ${me.folded ? 'is-folded' : ''}` }, [
+    el('div', { class: 'pokerhand__cards' }, me.hole.map((c) =>
+      playingCard(c, { size: 'lg', best: best.has(c), dim: me.folded }))),
+    el('div', { class: 'pokerhand__meta' }, [
+      el('b', { class: 'pokerhand__name', text: line || 'Your hand' }),
+      el('span', { class: 'label', text: `Stack ${chips(me.stack)}` }),
+    ]),
   ]);
 }
 
@@ -2002,38 +2161,55 @@ const pokerlab = {
   body(ctx) {
     const v = ctx.view;
     if (!v) return [waiting('Shuffling…')];
-
-    const seatList = el('ul', { class: 'plist' }, v.seats.map((s) => {
-      const p = ctx.room.players.find((x) => x.id === s.id) ?? { id: s.id, name: 'Player', online: true };
-      const bits = [chips(s.stack)];
-      if (s.lastAction) bits.push(actionLabel(s));
-      if (s.handName) bits.push(s.handName);
-      return ctx.playerTile(ctx, p, {
-        sub: bits.join(' · '),
-        state: s.folded && s.inHand ? 'FOLDED' : s.allIn ? 'ALL IN' : s.acting ? 'TO ACT' : undefined,
-        badges: [
-          s.isButton && el('span', { class: 'bdg bdg--btn', title: 'Dealer' }, ['D']),
-          s.hole && s.id !== ctx.me && el('span', { class: 'pokerpeek' }, s.hole.map((c) => playingCard(c, { size: 'xs' }))),
-        ].filter(Boolean),
-      });
-    }));
+    const deciding = v.myTurn && v.phase === 'hand';
 
     return [
-      scoreStrip(v.scorecard),
+      progressStrip(v),
+      // Preflop there is no board, so five empty slots is 280px of nothing on
+      // the most valuable real estate on the screen.
+      v.board?.length ? boardRow(ctx, v) : null,
       potStrip(v),
-      boardRow(ctx, v),
-      v.phase === 'handover' && handoverBanner(ctx, v),
-      gradeBanner(v.lastGrade),
-      myCards(ctx, v),
-      v.advice && coachPanel(ctx, v.advice),
-      seatList,
-      // Each seat's habit is printed on it. The point is not to hide the
-      // opponent's strategy — it is to teach you to punish it.
-      v.phase !== 'hand' && el('details', { class: 'card' }, [
-        el('summary', { class: 'label', text: 'Who you are playing' }),
-        el('ul', { class: 'log', style: 'margin-top:var(--sp-3)' }, v.seats.filter((s) => s.tell).map((s) =>
-          el('li', {}, [el('b', { text: ctx.nameOf(ctx, s.id) }), el('span', { text: s.tell })]))),
-      ]),
+      labHand(ctx, v),
+
+      // While deciding: the prompt (learn) or one hero number (guided).
+      deciding && v.coach === 'learn' ? drillPrompt(v.advice) : null,
+      deciding && v.coach === 'guided' ? guidedHero(v.advice) : null,
+
+      // After deciding: the verdict, the comparison, the lesson.
+      !deciding ? feedback(ctx, v) : null,
+      v.phase === 'handover' ? handoverBanner(ctx, v) : null,
+
+      el('ul', { class: 'plist' }, v.seats.map((s) => {
+        const p = ctx.room.players.find((x) => x.id === s.id)
+          ?? { id: s.id, name: 'Player', online: true };
+        const bits = [chips(s.stack)];
+        if (s.lastAction) bits.push(actionLabel(s));
+        // The winning hand is already named in the banner above; repeating it
+        // on four seat rows adds twenty words that say nothing new.
+        if (s.handName && v.phase === 'hand') bits.push(s.handName);
+        return ctx.playerTile(ctx, p, {
+          sub: bits.join(' · '),
+          state: s.folded && s.inHand ? 'FOLDED' : s.allIn ? 'ALL IN' : s.acting ? 'TO ACT' : undefined,
+          badges: [
+            s.isButton && el('span', { class: 'bdg bdg--btn', title: 'Dealer' }, ['D']),
+            s.hole && s.id !== ctx.me
+              && el('span', { class: 'pokerpeek' }, s.hole.map((c) => playingCard(c, { size: 'xs' }))),
+          ].filter(Boolean),
+        });
+      })),
+
+      // One disclosure between hands, not two competing ones.
+      v.phase !== 'hand' ? el('details', { class: 'card' }, [
+        el('summary', { class: 'label', text: 'Your progress' }),
+        el('div', { style: 'margin-top:var(--sp-3)' }, [
+          courseSheet(v),
+          el('div', { class: 'labstage' }, [
+            el('div', { class: 'labstage__head' }, [el('b', { text: 'Who you are playing' })]),
+            el('ul', { class: 'log' }, v.seats.filter((s) => s.tell).map((s) =>
+              el('li', {}, [el('b', { text: ctx.nameOf(ctx, s.id) }), el('span', { text: s.tell })]))),
+          ]),
+        ]),
+      ]) : null,
     ].filter(Boolean);
   },
 
@@ -2042,13 +2218,15 @@ const pokerlab = {
     if (!v) return bottom([]);
     if (v.phase === 'over') return playAgainBar(ctx);
     if (v.phase === 'handover') {
-      return bottom([
-        !v.revealed && el('button', {
-          class: 'btn btn--secondary btn--block',
-          onclick: () => ctx.send({ type: 'reveal' }),
-        }, ['Show me what they had']),
+      // One primary action. The reveal is a quiet text button, because seeing
+      // the cards is optional and the grade has already landed.
+      return bottom([el('div', { class: 'labover' }, [
         primary('Next hand', { onclick: () => ctx.send({ type: 'deal' }) }),
-      ].filter(Boolean));
+        !v.revealed ? el('button', {
+          class: 'btn btn--ghost labtext',
+          onclick: () => ctx.send({ type: 'reveal' }),
+        }, ['Their cards']) : null,
+      ].filter(Boolean))]);
     }
     if (!v.myTurn) return waitingBar(v.actor ? `${ctx.nameOf(ctx, v.actor)} is thinking…` : 'Dealing…');
     return holdem.bottom(ctx);
@@ -2065,12 +2243,17 @@ const pokerlab = {
     ]),
     el('div', { class: 'optionrow' }, [
       el('span', { text: 'Coach' }),
-      el('div', { class: 'seg' }, [['full', 'On'], ['quiet', 'Off']].map(([val, l]) =>
+      el('div', { class: 'seg' }, [['learn', 'Learn'], ['guided', 'Guided'], ['off', 'Off']].map(([val, l]) =>
         el('button', {
           'aria-pressed': String(ctx.room.config.coach === val),
           onclick: () => set({ coach: val }),
         }, [l]))),
     ]),
+    el('p', { class: 'optionnote', text: ctx.room.config.coach === 'guided'
+      ? 'Guided shows the numbers while you decide. Useful for a first session; staying in it is how people plateau.'
+      : ctx.room.config.coach === 'off'
+        ? 'No coaching at all. Just the table.'
+        : 'Learn shows only what a real table shows, then explains after you act. You remember far more of what you had to commit to first.' }),
   ],
 };
 

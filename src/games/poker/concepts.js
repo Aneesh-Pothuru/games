@@ -146,6 +146,8 @@ export const CONCEPTS = [
       + 'same; what changes is that you can control the size of the pot when you act last and cannot when you do not.',
     trap: 'Playing the same range from every seat. It is the single most common reason a losing player loses.',
     applies: (spot, a) => (Math.abs(a.realisation - 1) > 0.08 ? 1.3 : 0),
+    // Position applies on every street; it is the one idea that never stops
+    // being the answer.
   },
   {
     id: 'openingRanges',
@@ -206,7 +208,7 @@ export const CONCEPTS = [
       + 'name a worse hand that calls. If you cannot name one, you are not value betting, you are bluffing.',
     trap: 'Betting a medium hand into a range that only continues with better. That folds out everything you beat and '
       + 'gets called by everything that beats you.',
-    applies: (spot, a) => (spot.canCheck && a.equity?.equity >= 0.62 ? 1.9 : 0),
+    applies: (spot, a) => (spot.board.length >= 3 && spot.canCheck && a.equity?.equity >= 0.62 ? 1.9 : 0),
   },
   {
     id: 'showdownValue',
@@ -220,7 +222,7 @@ export const CONCEPTS = [
       + 'and better hands call — the exact opposite of what a bet is for.',
     trap: 'Betting third pair on the river "to find out where you are". You find out by checking, for free.',
     applies: (spot, a) => {
-      if (!spot.canCheck) return 0;
+      if (spot.board.length < 3 || !spot.canCheck) return 0;
       const eq = a.equity?.equity ?? 0;
       const drawing = (a.outs?.strongOuts ?? 0) >= 8;
       return eq > 0.42 && eq < 0.62 && !drawing ? 1.7 : 0;
@@ -238,6 +240,7 @@ export const CONCEPTS = [
       + 'That second way of winning is what makes it the most profitable bet in poker.',
     trap: 'Only betting made hands. If you bet strong hands and call with draws, everyone at the table can read you.',
     applies: (spot, a) => {
+      if (spot.board.length < 3) return 0;
       const drawing = (a.outs?.strongOuts ?? 0) >= 8;
       return drawing && spot.canRaise && (a.equity?.equity ?? 0) < 0.6 ? 2.0 : 0;
     },
@@ -268,7 +271,8 @@ export const CONCEPTS = [
     why: 'Risking 100 to win a pot of 100 breaks even at 50% folds. Risking 50 to win 100 breaks even at 33%. '
       + 'Smaller bluffs need to work less often, which is why cheap bluffs are the ones that print.',
     trap: 'Bluffing without asking the question. Most losing bluffs are bets that would need to work 70% of the time.',
-    applies: (spot, a) => (spot.canRaise && (a.equity?.equity ?? 0) < 0.4 && (a.outs?.strongOuts ?? 0) < 8 ? 1.5 : 0),
+    applies: (spot, a) => (spot.board.length >= 3 && spot.canRaise
+      && (a.equity?.equity ?? 0) < 0.4 && (a.outs?.strongOuts ?? 0) < 8 ? 1.5 : 0),
   },
   {
     id: 'mdf',

@@ -91,6 +91,7 @@ describe('what the coach reports', () => {
       }));
       assert.equal(a.options.find((o) => o.move === 'fold'), undefined,
         `fold offered with a free check on ${board.length} cards`);
+      assert.ok(a.potBb > 0, 'the pot in big blinds travels with the analysis');
       assert.ok(a.options.some((o) => o.move === 'check'));
       assert.notEqual(a.best.move, 'fold');
       assert.ok(!a.mixed?.includes('fold'), 'and it is never called an equal alternative');
@@ -215,7 +216,7 @@ describe('the arithmetic a student will check', () => {
 });
 
 describe('promise 1: never state a mixed strategy as a pure one', () => {
-  test('when two lines are within a twentieth of a big blind, it says either', () => {
+  test('when two lines are within a fraction of the pot, it says either', () => {
     // Constructed rather than hunted for: two options this close ARE the same
     // decision, and a coach that picks a winner between them is inventing
     // certainty the maths does not support.
@@ -231,9 +232,9 @@ describe('promise 1: never state a mixed strategy as a pure one', () => {
     const g = grade(a, { move: 'raise' });
     assert.equal(g.indifferent, true);
     assert.equal(g.evLoss, 0, 'an indifferent choice costs nothing');
-    assert.equal(g.grade, 'solid');
-    assert.match(g.why, /same/i);
-    assert.match(g.why, /check and raise/);
+    assert.equal(g.grade, 'optimal');
+    assert.match(g.verdict, /check and raise/);
+    assert.match(g.why, /indifferent/i);
   });
 
   test('a genuinely dominant line is NOT reported as mixed', () => {
@@ -269,17 +270,21 @@ describe('promise 3: grade the decision, not the result', () => {
     const a = analyse(spot({ pot: 300, toCall: 100, canCheck: false }));
     const g = grade(a, { move: a.best.move });
     assert.equal(g.evLoss, 0);
-    assert.equal(g.grade, 'solid');
+    assert.ok(['optimal', 'fine'].includes(g.grade), g.grade);
     assert.equal(g.chosen, a.best.move);
   });
 
-  test('a worse line loses exactly the EV gap, and the gap is quoted', () => {
+  test('a worse line loses exactly the EV gap, in big blinds and as a share of the pot', () => {
     const a = analyse(spot({ pot: 300, toCall: 100, canCheck: false }));
     const worst = a.options[a.options.length - 1];
     const g = grade(a, { move: worst.move });
     if (!g.indifferent) {
-      assert.ok(Math.abs(g.evLoss - (a.best.ev - worst.ev)) < 1e-9);
-      assert.match(g.why, new RegExp(`${g.evLoss.toFixed(2)}bb`));
+      assert.ok(Math.abs(g.evLoss - (a.best.ev - worst.ev)) < 1e-9, 'bb loss');
+      assert.ok(Math.abs(g.severity - g.evLoss / a.potBb) < 1e-9, 'severity is the loss over the pot');
+      // The verdict names the better line rather than quoting arithmetic at
+      // the player: a label read alongside a number gets the number read and
+      // the label ignored.
+      assert.match(g.verdict, new RegExp(a.best.move, 'i'));
     }
   });
 
@@ -292,25 +297,54 @@ describe('promise 3: grade the decision, not the result', () => {
 });
 
 describe('grade bands', () => {
-  test('the four bands, in order, with the last one open-ended', () => {
-    assert.deepEqual(GRADES.map((g) => g.id), ['solid', 'loose', 'mistake', 'blunder']);
+  test('the five bands, in order, with the last one open-ended', () => {
+    assert.deepEqual(GRADES.map((g) => g.id), ['optimal', 'fine', 'leak', 'mistake', 'blunder']);
     for (let i = 1; i < GRADES.length; i++) {
       assert.ok(GRADES[i].max > GRADES[i - 1].max, 'bands must widen');
     }
     assert.equal(GRADES[GRADES.length - 1].max, Infinity);
   });
 
-  test('the thresholds are anchored to real solver error costs', () => {
-    // Opening one hand too wide costs about 0.14bb, so a range slip must land
-    // in "slightly off". A wrong turn size costs about 0.87bb, so it must land
-    // in "mistake" and not be dismissed or called a blunder.
-    assert.equal(gradeFor(0).id, 'solid');
-    assert.equal(gradeFor(0.05).id, 'solid');
-    assert.equal(gradeFor(0.14).id, 'loose');
-    assert.equal(gradeFor(0.31).id, 'mistake');
-    assert.equal(gradeFor(0.87).id, 'mistake');
-    assert.equal(gradeFor(2.5).id, 'blunder');
-    assert.equal(gradeFor(Infinity).id, 'blunder');
+  test('the thresholds are a share of the pot, and land where chess landed', () => {
+    // Chess.com and Lichess arrived independently at inaccuracy from about 5%
+    // of win probability, mistake from 10%, blunder from 15-20%. Those are the
+    // same shape of quantity as "share of the pot given up", and the bands
+    // here are set to match rather than to a number somebody liked.
+    // One big blind sits between both absolute guards, so only the ratio acts.
+    const big = 1;
+    assert.equal(gradeFor(0, big).id, 'optimal');
+    assert.equal(gradeFor(0.004, big).id, 'optimal');
+    assert.equal(gradeFor(0.01, big).id, 'fine');
+    assert.equal(gradeFor(0.03, big).id, 'leak');
+    assert.equal(gradeFor(0.10, big).id, 'mistake');
+    assert.equal(gradeFor(0.30, big).id, 'blunder');
+    assert.equal(gradeFor(Infinity, big).id, 'blunder');
+  });
+
+  test('the absolute guards stop the ratio overcorrecting at both ends', () => {
+    // Floor: a fifth of a big blind cannot be a blunder however small the pot.
+    // This is the documented complaint about trainers that grade on the ratio
+    // alone — "what should be a mistake is often listed as a blunder".
+    assert.equal(gradeFor(0.9, 0.05).id, 'fine', 'a twentieth of a blind is never serious');
+    assert.equal(gradeFor(0.9, 0.3).id, 'mistake', 'a third of a blind caps below blunder');
+    // Ceiling: two big blinds cannot be flawless however big the pot.
+    assert.equal(gradeFor(0.001, 2.5).id, 'mistake', 'two and a half blinds is an error');
+    assert.equal(gradeFor(0.4, 8).id, 'blunder', 'and a big ratio on a big loss still is');
+  });
+
+  test('the same big-blind error is graded differently in a big pot and a small one', () => {
+    // The whole point of normalising. Half a big blind given up in a 3bb
+    // preflop pot is a real error; the same half blind in a 90bb pot is a
+    // rounding difference, and calling them both the same thing teaches a
+    // student to fear cheap mistakes and shrug at expensive ones.
+    const opts = [{ move: 'raise', ev: 1 }, { move: 'fold', ev: 0.7 }];
+    const node = (potBb) => ({ potBb, options: opts, best: { move: 'raise', ev: 1, why: 'x' }, mixed: null });
+    const a = grade(node(3), { move: 'fold' });
+    const b = grade(node(90), { move: 'fold' });
+    assert.equal(a.evLoss.toFixed(4), b.evLoss.toFixed(4), 'the same 0.3 big blinds');
+    assert.notEqual(a.grade, b.grade, 'and not the same mistake');
+    assert.equal(a.grade, 'mistake', '10% of a 3bb pot is a real error');
+    assert.equal(b.grade, 'optimal', 'a third of a percent of a 90bb pot is nothing');
   });
 
   test('the bands are contiguous — no EV loss falls through', () => {

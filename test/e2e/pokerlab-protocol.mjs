@@ -135,39 +135,65 @@ if (dealt) {
 
   if (advised) {
     const a = advised.view.advice;
-    check('the coach states a line', Boolean(a.best?.move), JSON.stringify(a.best));
-    check('and explains it', (a.best?.why?.length ?? 0) > 20);
-    check('with several facts behind it', a.facts.length >= 2, `${a.facts.length} facts`);
+    const mode = advised.view.coach;
+    check('the default mode is learn', mode === 'learn', String(mode));
 
-    const eq = a.facts.find((f) => f.key === 'equity');
-    check('equity is reported', Boolean(eq));
-    // Promise: an estimate never wears the clothes of arithmetic. Postflop the
-    // engine enumerates and the number is exact; preflop it samples and must
-    // carry its error bar.
-    check('and is either exact or carries its error bar',
-      eq.exact ? /exact/.test(eq.detail) : /±/.test(eq.detail), eq.detail);
-    check('facts are individually flagged exact or estimated',
-      a.facts.every((f) => typeof f.exact === 'boolean'));
+    // THE REDACTION THAT MAKES IT A TRAINER. Before you act, the wire carries
+    // the name of the idea being tested and nothing that resolves it. Not
+    // hidden by CSS — absent, so a curious player cannot read the answer out
+    // of the network tab any more than out of a real table.
+    check('before you act, only the concept is sent', a.prompt === true, JSON.stringify(Object.keys(a)));
+    check('and it names the idea', Boolean(a.lesson?.name), JSON.stringify(a.lesson));
+    check('no equity is sent', a.equity === undefined);
+    check('no recommendation is sent', a.best === undefined);
+    check('no option list is sent', a.options === undefined);
+    check('no facts are sent', a.facts === undefined);
+    const raw = JSON.stringify(a);
+    check('and nothing percentage-shaped leaks through', !/\d+(\.\d+)?%/.test(raw), raw.slice(0, 200));
+    console.log(`     drilling: ${a.lesson?.name}`);
 
-    check('every line is priced in big blinds',
-      a.options.length >= 2 && a.options.every((o) => Number.isFinite(o.ev)),
-      JSON.stringify(a.options.map((o) => [o.move, o.ev])));
-    // Folding is exactly zero when it is a choice at all — and it is NOT a
-    // choice when checking is free, because folding instead of checking is the
-    // one strictly dominated action in poker.
-    const fold = a.options.find((o) => o.move === 'fold');
-    const canCheck = a.options.some((o) => o.move === 'check');
-    check(canCheck ? 'no fold is offered when checking is free' : 'folding is exactly zero',
-      canCheck ? fold === undefined : fold?.ev === 0,
-      JSON.stringify(a.options.map((o) => o.move)));
-    check('the best line is the top of the list',
-      a.options.every((o) => o.ev <= a.best.ev));
-    // Never state a mixed spot as a pure one.
-    check('a mix is reported as a mix, or not at all',
-      a.mixed === null || a.mixed.length > 1, JSON.stringify(a.mixed));
+    // --------------------------------------------------- act, then learn ---
 
-    console.log(`     coach: ${a.mixed ? `${a.mixed.join(' or ')} — same value` : a.best.move}`
-      + ` | ${a.facts.map((f) => `${f.label} ${f.value}`).join(' | ')}`);
+    const before = frames.length;
+    // The wire shape the real client uses: a game action wrapped in `action`.
+    ws.send(JSON.stringify({ t: 'action', action: { type: 'act', move: 'fold' } }));
+    const graded = await seen((f, i) => i >= before && f.view?.lastGrade, 20_000);
+    check('acting produces a grade', Boolean(graded), 'no graded frame arrived');
+
+    if (graded) {
+      const gr = graded.view.lastGrade;
+      const full = graded.view.lastAdvice;
+
+      check('the grade carries a band', typeof gr.label === 'string' && gr.label.length > 2, gr.label);
+      check('and a verdict sentence', (gr.verdict?.length ?? 0) > 10, gr.verdict);
+      check('and the loss in big blinds', Number.isFinite(gr.evLoss));
+      // Normalised, which is the whole reason the same big blind can be a
+      // mistake in one pot and nothing in another.
+      check('and the loss as a share of the pot', Number.isFinite(gr.severity));
+      check('the label is about the move, not the player',
+        !/\byou\b/i.test(gr.verdict ?? ''), gr.verdict);
+
+      check('a named lesson comes back with it', Boolean(gr.lesson?.name), JSON.stringify(gr.lesson?.name));
+      check('the lesson explains this spot', (gr.lesson?.point?.length ?? 0) > 20, gr.lesson?.point);
+      check('and gives a rule that transfers', (gr.lesson?.rule?.length ?? 0) > 20, gr.lesson?.rule);
+
+      check('NOW the numbers arrive', Boolean(full?.facts?.length), 'no analysis after acting');
+      check('with every line priced', (full?.options?.length ?? 0) >= 2,
+        JSON.stringify(full?.options?.map((o) => [o.move, o.ev])));
+      const eq = full?.facts?.find((f) => f.key === 'equity');
+      check('equity is either exact or carries its error bar',
+        eq ? (eq.exact ? /exact/.test(eq.detail) : /±/.test(eq.detail)) : false, eq?.detail);
+
+      console.log(`     ${gr.label}: ${gr.verdict} | lesson: ${gr.lesson?.name}`);
+    }
+
+    // ------------------------------------------------------- the course ---
+    const course = graded?.view?.course ?? advised.view.course;
+    check('a course of named concepts is tracked', (course?.rows?.length ?? 0) >= 10,
+      `${course?.rows?.length} concepts`);
+    check('grouped into stages', (course?.stages?.length ?? 0) >= 3);
+    check('every concept has a mastery band', course?.rows?.every((r) => r.band?.label));
+    check('and there is something to work on next', Boolean(course?.next?.name), course?.next?.name);
   }
 }
 

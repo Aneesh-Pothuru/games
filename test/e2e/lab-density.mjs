@@ -47,8 +47,14 @@ const measure = (page) => page.evaluate(() => {
   const flow = document.querySelector('.flow');
   const bar = document.querySelector('.bar--bottom');
   const text = (flow?.innerText ?? '').trim();
+  // Only elements that actually SET type: a leaf with its own text, and not a
+  // playing card. A card's rank is an illustration sized in container units —
+  // counting it as a type size makes the metric measure the deck rather than
+  // the hierarchy. Containers are excluded too; they merely inherit the body
+  // size and would inflate the count without ever putting a word on screen.
   const sizes = [...document.querySelectorAll('.flow *')]
-    .filter((n) => n.textContent?.trim())
+    .filter((n) => !n.closest('.pcard'))
+    .filter((n) => [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim()))
     .map((n) => parseFloat(getComputedStyle(n).fontSize))
     .filter((n) => n > 0);
 
@@ -94,7 +100,7 @@ for (const [label, device] of widths) {
   await page.locator('.bar--bottom .btn--primary').click();
   await page.waitForSelector('.roomcode', { timeout: 20000 });
   await page.locator('.bar--bottom .btn--primary').click();
-  await page.waitForSelector('.pokerboard', { timeout: 20000 });
+  await page.waitForSelector('.pokerhand', { timeout: 20000 });
 
   // --- the decision moment ---
   for (let i = 0; i < 150 && !(await page.locator('.pokeract').count()); i++) {

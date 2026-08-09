@@ -10,11 +10,12 @@
     "test": "node --test \"test/**/*.test.js\"",
     "test:watch": "node --test --watch \"test/**/*.test.js\"",
     "test:protocol": "node test/e2e/protocol.mjs && node test/e2e/pokerlab-protocol.mjs",
-    "test:browser": "node test/e2e/browser.mjs && node test/e2e/visual.mjs && node test/e2e/typing.mjs && node test/e2e/nightfall-browser.mjs && node test/e2e/poker-browser.mjs && node test/e2e/pokerlab-browser.mjs && node test/e2e/cheat-browser.mjs",
+    "test:browser": "node test/e2e/browser.mjs && node test/e2e/visual.mjs && node test/e2e/typing.mjs && node test/e2e/nightfall-browser.mjs && node test/e2e/poker-browser.mjs && node test/e2e/pokerlab-browser.mjs && node test/e2e/lab-density.mjs && node test/e2e/cheat-browser.mjs",
     "test:journeys": "node test/e2e/journeys.mjs",
     "test:lab": "node test/e2e/pokerlab-browser.mjs",
     "test:exhaustive": "POKER_EXHAUSTIVE=1 node --test test/fasteval.test.js",
-    "test:prod": "BASE_URL=${BASE_URL:-https://games.apothuru.com} node test/e2e/pokerlab-protocol.mjs"
+    "test:prod": "BASE_URL=${BASE_URL:-https://games.apothuru.com} node test/e2e/pokerlab-protocol.mjs",
+    "test:density": "node test/e2e/lab-density.mjs"
   },
   "devDependencies": {
     "playwright": "^1.62.1",

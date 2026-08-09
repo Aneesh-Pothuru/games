@@ -56,11 +56,15 @@ await page.screenshot({ path: `${OUT}/40-lab-lobby.png` });
 const startBtn = page.locator('.bar--bottom .btn--primary');
 check('the start button is enabled with one player', await startBtn.isEnabled());
 await startBtn.click();
-await page.waitForSelector('.pokerboard', { timeout: 15000 });
+// The board is not rendered preflop — five empty slots is 280px of nothing
+// on the most valuable part of the screen. Wait for your own cards instead.
+await page.waitForSelector('.pokerhand', { timeout: 15000 });
 
 // -------------------------------------------------------------- the deal ---
 
-check('the board renders five slots', (await page.locator('.pokerboard .pcard').count()) === 5);
+check('no empty board is drawn before the flop',
+  (await page.locator('.pokerboard').count()) === 0,
+  'five empty card slots preflop is 280px of nothing');
 check('you are dealt two cards', (await page.locator('.pokerhand__cards .pcard').count()) === 2);
 
 const seatCount = await page.locator('.ptile').count();
@@ -94,39 +98,24 @@ const waitForMyTurn = async (ms = 25000) => {
 };
 check('the table reaches your decision without another human', await waitForMyTurn());
 
-// ---------------------------------------------------------------- the coach -
+// -------------------------------------------------- while you decide -------
 
-const coach = page.locator('.coach');
-let sawCoach = false;
-if (await coach.count()) {
-  sawCoach = true;
-  const text = await coach.innerText();
-  check('the coach quotes your equity', /equity/i.test(text), text.slice(0, 200));
-  check('the coach quotes a percentage', /\d+\.\d%/.test(text), text.slice(0, 200));
-  check('the coach names a recommended line', /fold|check|call|raise/i.test(
-    await coach.locator('.coach__call').innerText(),
-  ));
-
-  const facts = await coach.locator('.coach__fact').count();
-  check('the coach shows several facts, not one number', facts >= 2, `${facts} facts`);
-
-  // Promise 2: an estimate must look different from arithmetic. Preflop the
-  // equity is sampled and carries an error bar; the price never does.
-  const estimated = await coach.locator('.coach__val.is-estimate').count();
-  const hasErrorBar = /±/.test(text);
-  check('a sampled number is marked as an estimate and shows its bar',
-    estimated === 0 || hasErrorBar, `estimated=${estimated} bar=${hasErrorBar}`);
-
-  const opts = await coach.locator('.coach__opt').count();
-  check('every line is priced in big blinds', opts >= 2, `${opts} options`);
-  const evText = await coach.locator('.coach__ev').first().innerText();
-  check('and the price is a signed bb figure', /^[+-]?\d+\.\d\dbb$/.test(evText), evText);
-
-  const best = await coach.locator('.coach__opt.is-best').count();
-  check('exactly one line is marked best', best === 1, `${best} marked`);
-  await page.screenshot({ path: `${OUT}/42-lab-coach.png` });
+// In learn mode the screen carries what a real table carries and one more
+// thing: the NAME of the idea being tested. Not the answer — feedback only
+// reliably helps when the learner attempted the problem first, and a screen
+// that shows the solution first trains reading a dashboard rather than
+// playing poker.
+const prompt = page.locator('.labprompt');
+check('the drill names the idea being tested', (await prompt.count()) === 1);
+if (await prompt.count()) {
+  const t = await prompt.innerText();
+  check('and it is a named concept', /[A-Za-z]{4,}/.test(t), t);
+  check('but it does not give the answer away',
+    !/%|bb|fold|call|raise|check/i.test(t.replace(/this decision/i, '')), t);
 }
-check('the coach panel appeared at all', sawCoach);
+check('no numbers panel is shown before you act',
+  (await page.locator('.labhero').count()) === 0
+  && (await page.locator('.labfeed').count()) === 0);
 
 // ------------------------------------------------- act, and get graded ------
 
@@ -161,12 +150,31 @@ for (let step = 0; step < 120; step++) {
 check('a hand plays to the end against the bots', handover);
 
 if (handover) {
+  const feed = page.locator('.labfeed');
+  check('the feedback block appears after the hand', (await feed.count()) >= 1);
+  if (await feed.count()) {
+    const t = await feed.innerText();
+    check('it leads with a grade band', /Optimal|Fine|Slight leak|Mistake|Blunder/.test(t), t.slice(0, 80));
+    check('it explains in words before it shows a bar', /[a-z]{4,}\s+[a-z]{4,}/.test(t));
+    check('it names the concept', (await feed.locator('.lablesson__tag').count()) >= 1);
+    check('it prices every line as a bar', (await feed.locator('.labbar').count()) >= 2);
+    check('exactly one line is marked best', (await feed.locator('.labbar.is-best').count()) === 1);
+    check('and the line you took is marked', (await feed.locator('.labbar.is-chosen').count()) >= 1);
+    // Level two of two, and never more.
+    check('the numbers are behind one tap', (await feed.locator('.labmore').count()) === 1);
+    check('and are collapsed until asked',
+      !(await feed.locator('.labmore[open]').count()));
+    await feed.locator('.labmore__sum').click();
+    await page.waitForTimeout(300);
+    check('tapping opens them in place', (await feed.locator('.labfact').count()) >= 2);
+  }
+
   // Promise 3, and the one the whole design hangs on: the grade lands BEFORE
   // the cards do. If the runout is already on screen when the feedback
   // arrives, the student learns from the result instead of the decision.
   const screen = await page.locator('.flow').innerText();
-  const graded = /Solid|Slightly off|Mistake|Blunder|Either was fine/.test(screen);
-  const revealBtn = page.locator('.bar--bottom .btn--secondary', { hasText: /Show me what they had/i });
+  const graded = /Optimal|Fine|Slight leak|Mistake|Blunder/.test(screen);
+  const revealBtn = page.locator('.bar--bottom button', { hasText: /Their cards/i });
   const stillHidden = (await revealBtn.count()) === 1;
 
   check('a grade is shown after the hand', graded, screen.slice(0, 300));
@@ -207,20 +215,28 @@ check('the running score is shown', /decisions?/i.test(scoreText), scoreText.sli
 // Under twenty decisions it must show the running TOTAL, not extrapolate a
 // per-100 rate out of five samples.
 check('and it does not extrapolate a rate from a handful of decisions',
-  /bb lost so far/i.test(scoreText), scoreText.slice(0, 200));
+  /bb lost/i.test(scoreText) && !/\/ 100/.test(scoreText), scoreText.slice(0, 200));
 
 // ------------------------------------------------------------- the shell ---
 
 const scroll = await page.evaluate(() => {
   const flow = document.querySelector('.flow');
-  const before = flow.scrollTop;
+  if (!flow) return { ok: false, body: false, why: 'no .flow element' };
+  // Reset first. Asserting that setting scrollTop CHANGES it silently passes
+  // only from the top of the page — if an earlier interaction already scrolled
+  // us to the bottom, the assignment is a no-op and a perfectly scrollable
+  // pane reports as stuck.
+  flow.scrollTop = 0;
   flow.scrollTop = 9999;
+  const scrolled = flow.scrollTop > 0;
+  const fits = flow.scrollHeight <= flow.clientHeight + 1;
   return {
-    moved: flow.scrollTop !== before || flow.scrollHeight <= flow.clientHeight + 1,
+    ok: scrolled || fits,
     body: document.body.scrollHeight > window.innerHeight + 1,
+    why: `scrollH ${flow.scrollHeight} clientH ${flow.clientHeight} reached ${flow.scrollTop}`,
   };
 });
-check('the lab screen scrolls or fits', scroll.moved);
+check('the lab screen scrolls or fits', scroll.ok, scroll.why);
 check('the page body never scrolls', !scroll.body);
 check('no horizontal overflow', !(await page.evaluate(
   () => document.documentElement.scrollWidth > window.innerWidth + 1,

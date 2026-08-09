@@ -1242,35 +1242,208 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 }
 
 /* ------------------------------------------------------------- the coach -- */
-.coach {
+/* ============================================================ the lab ==== */
+/* The teaching surfaces. Three rules run through all of it:
+
+   ONE HERO PER SCREEN. The hero is 1.8x the runner-up and 3x its own label.
+   That gap IS the hierarchy — the old panel had seven active sizes, which is
+   another way of saying it had none.
+
+   SPACE BETWEEN GROUPS IS TWICE THE SPACE WITHIN THEM. Nearly every "this has
+   no hierarchy" complaint on a dense screen is that ratio sitting at 1:1.
+
+   COLOUR IS NEVER THE ONLY CHANNEL. Every grade band carries a word, so the
+   screen survives greyscale and colour-blindness both. */
+
+/* --- while you decide: the name of the idea, and nothing else ------------ */
+.labprompt {
+  display: flex; align-items: baseline; gap: var(--sp-2);
+  padding: var(--sp-3); border-radius: var(--r-3);
+  background: var(--bg-inset);
+  box-shadow: inset 0 0 0 var(--hair) var(--line-2);
+}
+.labprompt__eyebrow {
+  font-size: var(--t-2xs); font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-3); flex: 0 0 auto;
+}
+.labprompt__name { font-size: var(--t-md); color: var(--text-1); }
+
+/* --- guided mode: exactly one number ------------------------------------ */
+.labhero {
+  display: grid; grid-template-columns: auto 1fr; align-items: baseline;
+  gap: 2px var(--sp-3); padding: var(--sp-3);
   border-radius: var(--r-3); background: var(--bg-inset);
   box-shadow: inset 0 0 0 var(--hair) var(--game-accent);
-  padding: var(--sp-3);
 }
-.coach__head {
-  display: flex; align-items: baseline; justify-content: space-between;
-  gap: var(--sp-2); cursor: pointer; min-height: var(--tap);
+.labhero__val {
+  font-size: 40px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--game-accent); font-variant-numeric: tabular-nums;
 }
-/* Only the first letter. `capitalize` renders "fold or call" as "Fold Or
-   Call", which reads as a headline rather than as a sentence about poker. */
-.coach__call { color: var(--game-accent); font-size: var(--t-md); }
-.coach__call::first-letter { text-transform: uppercase; }
-.coach__body { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-2); }
-.coach__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sp-3); }
-.coach__fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.coach__val { font-size: var(--t-lg); font-variant-numeric: tabular-nums; color: var(--text-1); }
-/* An estimate must never look like a measurement. The dotted rule under a
-   sampled number is the whole difference between "66.5%" and "66.5% ± 1.4". */
-.coach__val.is-estimate {
-  text-decoration: underline dotted var(--line-strong);
-  text-underline-offset: 4px;
+.labhero__label {
+  font-size: var(--t-xs); font-weight: 500; color: var(--text-3);
 }
-.coach__opts { display: flex; flex-direction: column; gap: var(--sp-2); }
-.coach__opt {
-  display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3);
-  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-2);
-  background: var(--bg-raised); text-transform: capitalize;
+/* An estimate must never look like a measurement. */
+.labhero__val.is-estimate, .labfact__val.is-estimate {
+  text-decoration: underline dotted var(--line-strong); text-underline-offset: 5px;
 }
-.coach__opt.is-best { box-shadow: inset 0 0 0 var(--hair) var(--game-accent); }
-.coach__opt .coach__ev { text-align: right; color: var(--game-accent); font-weight: 700; }
-.coach__opt .dim { grid-column: 1 / -1; text-transform: none; }
+.labhero__point {
+  grid-column: 1 / -1; margin-top: var(--sp-2);
+  font-size: var(--t-sm); line-height: 1.5; color: var(--text-2);
+}
+
+/* --- after you act: verdict, comparison, lesson -------------------------- */
+.labfeed {
+  --tone: var(--line-strong);
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  padding: var(--sp-4); border-radius: var(--r-3);
+  background: var(--bg-inset);
+  box-shadow: inset 0 0 0 var(--hair) var(--line), inset 3px 0 0 var(--tone);
+}
+.labfeed.is-optimal { --tone: var(--success); }
+.labfeed.is-fine    { --tone: var(--success); }
+.labfeed.is-leak    { --tone: var(--warn); }
+.labfeed.is-mistake { --tone: #f97316; }
+.labfeed.is-blunder { --tone: var(--danger); }
+
+.labfeed__head { display: flex; align-items: baseline; gap: var(--sp-3); }
+.labfeed__grade {
+  font-size: var(--t-lg); line-height: 1.25; font-weight: 600;
+  letter-spacing: -0.01em; color: var(--tone);
+}
+.labfeed__cost {
+  font-size: var(--t-sm); font-weight: 600; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.labfeed__verdict {
+  font-size: var(--t-sm); line-height: 1.5; color: var(--text-1); margin: 0;
+}
+
+/* --- one bar per line: length from a shared baseline --------------------- */
+.labbars { display: flex; flex-direction: column; gap: var(--sp-2); }
+.labbar {
+  display: grid; grid-template-columns: 86px 1fr 52px;
+  align-items: center; gap: var(--sp-2); min-height: 28px;
+}
+.labbar__name {
+  font-size: var(--t-xs); color: var(--text-3); text-transform: capitalize;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.labbar__track {
+  position: relative; height: 8px; border-radius: 999px;
+  background: var(--bg-sunken); overflow: hidden;
+}
+.labbar__fill {
+  position: absolute; top: 0; bottom: 0; border-radius: 999px;
+  background: var(--line-strong);
+  transition: width var(--d-4) var(--ease-out), left var(--d-4) var(--ease-out);
+}
+.labbar__zero { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--line-2); }
+.labbar__ev {
+  font-size: var(--t-sm); font-weight: 600; text-align: right; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.labbar.is-best .labbar__fill { background: var(--game-accent); }
+.labbar.is-best .labbar__name, .labbar.is-best .labbar__ev { color: var(--text-1); }
+/* The line you took is outlined rather than filled, so "what I did" and "what
+   was best" are two different channels and can coincide without ambiguity. */
+.labbar.is-chosen .labbar__track { box-shadow: 0 0 0 2px var(--focus); }
+
+/* --- the lesson: the part that is supposed to survive the session -------- */
+.lablesson {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding-top: var(--sp-3); border-top: var(--hair) solid var(--line);
+}
+.lablesson__tag {
+  align-self: flex-start; padding: 3px var(--sp-2); border-radius: var(--r-pill);
+  background: var(--bg-raised); color: var(--text-2);
+  font-size: var(--t-2xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.lablesson__point { font-size: var(--t-sm); line-height: 1.5; color: var(--text-1); margin: 0; }
+.lablesson__rule { font-size: var(--t-sm); line-height: 1.5; color: var(--text-3); margin: 0; }
+
+/* --- level two of two: everything numeric ------------------------------- */
+.labmore { border-top: var(--hair) solid var(--line); padding-top: var(--sp-2); }
+.labmore__sum {
+  display: flex; align-items: center; min-height: var(--tap);
+  font-size: var(--t-sm); color: var(--text-2); cursor: pointer;
+}
+.labmore__body { display: flex; flex-direction: column; gap: var(--sp-4); padding-bottom: var(--sp-2); }
+.labfact { display: flex; flex-direction: column; gap: 2px; }
+.labfact__label { font-size: var(--t-xs); font-weight: 500; color: var(--text-3); }
+.labfact__val {
+  font-size: var(--t-md); font-weight: 600; color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.labfact__detail { font-size: var(--t-xs); line-height: 1.5; color: var(--text-3); }
+.labfact__warn {
+  font-size: var(--t-sm); line-height: 1.5; color: var(--warn); margin: 0;
+}
+.labfact__why { font-size: var(--t-sm); line-height: 1.5; color: var(--text-2); margin: 0; }
+
+/* --- progress ------------------------------------------------------------ */
+.labstrip {
+  display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap;
+  font-size: var(--t-xs); color: var(--text-3);
+}
+.labstrip__v { font-variant-numeric: tabular-nums; color: var(--text-2); }
+.labstrip__sep { color: var(--line-2); }
+.labstrip__next { margin-left: auto; color: var(--game-accent); }
+
+.labnext {
+  display: flex; flex-direction: column; gap: var(--sp-1);
+  padding: var(--sp-3); border-radius: var(--r-3); background: var(--bg-inset);
+  box-shadow: inset 0 0 0 var(--hair) var(--game-accent); margin-bottom: var(--sp-4);
+}
+.labnext__eyebrow {
+  font-size: var(--t-2xs); font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.labnext__name { font-size: var(--t-lg); font-weight: 600; color: var(--text-1); }
+.labnext__idea { font-size: var(--t-sm); line-height: 1.5; color: var(--text-2); margin: 0; }
+.labnext__rule { font-size: var(--t-sm); line-height: 1.5; color: var(--text-3); margin: 0; }
+
+.labstage { margin-bottom: var(--sp-5); }
+.labstage__head { display: flex; align-items: baseline; justify-content: space-between; }
+.labstage__count { font-size: var(--t-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.labstage__blurb { font-size: var(--t-xs); line-height: 1.5; color: var(--text-3); margin: 2px 0 var(--sp-3); }
+.labskills { display: flex; flex-direction: column; gap: var(--sp-2); }
+.labskill {
+  --band: var(--line-2);
+  display: grid; grid-template-columns: 1fr auto; gap: 2px var(--sp-2);
+  align-items: baseline;
+}
+.labskill.is-shaky   { --band: var(--danger); }
+.labskill.is-getting { --band: var(--warn); }
+.labskill.is-solid   { --band: var(--success); }
+.labskill.is-sharp   { --band: var(--game-accent); }
+.labskill__name { font-size: var(--t-sm); color: var(--text-2); }
+.labskill__band { font-size: var(--t-xs); color: var(--band); }
+.labskill__meter {
+  grid-column: 1 / -1; height: 4px; border-radius: 999px;
+  background: var(--bg-sunken); overflow: hidden;
+}
+.labskill__fill {
+  display: block; height: 100%; border-radius: 999px; background: var(--band);
+  transition: width var(--d-4) var(--ease-out);
+}
+
+/* A text button that reads as a link, not as a slab. Full 48px hit area from
+   padding; the ink is 15px. */
+.labover { display: flex; gap: var(--sp-2); width: 100%; align-items: stretch; }
+.labover .btn--primary { flex: 1 1 auto; }
+/* Small ink, full hit box: the visible control is 15px of text, the target is
+   the whole 48px-tall padded button. Height is not what makes a control
+   reachable — area is, and width is free on a phone. */
+.labtext {
+  flex: 0 0 auto; min-height: var(--tap); font-size: var(--t-sm); font-weight: 500;
+  color: var(--text-3); background: none; box-shadow: none;
+  padding-inline: var(--sp-3); white-space: nowrap;
+}
+.optionnote {
+  font-size: var(--t-xs); line-height: 1.5; color: var(--text-3);
+  margin: calc(-1 * var(--sp-2)) 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .labbar__fill, .labskill__fill { transition: none; }
+}

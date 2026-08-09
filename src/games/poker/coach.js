@@ -24,6 +24,7 @@ import { CATEGORY, categoryOf, describe, evaluate } from './cards.js';
 import { equityVsRange, outsFor } from './equity.js';
 import { classOf } from './notation.js';
 import { rangeByWidth } from './bots.js';
+import { conceptsFor } from './concepts.js';
 import { LEAKS, POSITION_NAME, RFI, preflopPlan } from './ranges.js';
 import {
   alpha, commitmentAdvice, equityForNextCard, equityFromOuts, evOfCall,
@@ -31,25 +32,64 @@ import {
 } from './odds.js';
 
 /**
- * Grade bands, in big blinds of EV given up against the best action.
- * Anchored to measured solver error costs: opening one hand too wide is about
- * 0.14bb, a wrong flop size about 0.31bb, the same error on the turn 0.87bb.
- * So a range slip lands in "slightly off", a real strategic error in
- * "mistake", and only genuinely large errors reach "blunder".
+ * Grade bands, in EV given up AS A SHARE OF THE POT.
+ *
+ * Not in big blinds, and the difference matters more than it looks. Giving up
+ * half a big blind in a 3bb preflop pot is a serious error; giving up the same
+ * half blind in a 90bb pot is a rounding difference. Grading both the same
+ * teaches a student to fear cheap mistakes and shrug at expensive ones.
+ *
+ * Chess made exactly this move and for exactly this reason — Lichess grades a
+ * move by the drop in WIN PROBABILITY rather than by centipawns, because
+ * "losing 300 centipawns in an equal position is a major blunder, but losing
+ * 300 centipawns when already winning makes almost no difference". Normalising
+ * by the pot is the poker form of the same correction.
+ *
+ * Five bands rather than four, because poker needs one chess does not: a band
+ * that says "you did not err, this spot genuinely has more than one answer".
+ * The label is a property of the DECISION, never of the person — "Blunder"
+ * describes a move, and feedback that redirects attention to the self is the
+ * documented way feedback makes performance worse rather than better.
  */
 export const GRADES = [
-  { id: 'solid', label: 'Solid', max: 0.05 },
-  { id: 'loose', label: 'Slightly off', max: 0.25 },
-  { id: 'mistake', label: 'Mistake', max: 1.0 },
-  { id: 'blunder', label: 'Blunder', max: Infinity },
+  { id: 'optimal', label: 'Optimal', max: 0.005, quality: 1 },
+  { id: 'fine', label: 'Fine', max: 0.02, quality: 1 },
+  { id: 'leak', label: 'Slight leak', max: 0.05, quality: 0.5 },
+  { id: 'mistake', label: 'Mistake', max: 0.15, quality: 0.25 },
+  { id: 'blunder', label: 'Blunder', max: Infinity, quality: 0 },
 ];
 
-export function gradeFor(evLoss) {
-  return GRADES.find((g) => evLoss <= g.max) ?? GRADES[GRADES.length - 1];
+/**
+ * @param severity EV loss divided by the pot at the decision node.
+ * @param evLoss   the same loss in big blinds, for the absolute guards.
+ *
+ * Normalising alone overcorrects at both ends, so two guards bound it. Without
+ * the floor, a tiny preflop pot turns a fifth-of-a-blind range slip into a
+ * "blunder" — the exact complaint users make about trainers that grade this
+ * way. Without the ceiling, giving up two big blinds in a huge pot reads as
+ * flawless because the pot was big enough to hide it.
+ */
+export function gradeFor(severity, evLoss = Infinity) {
+  const band = GRADES.findIndex((g) => severity <= g.max);
+  let i = band < 0 ? GRADES.length - 1 : band;
+
+  // Floor: small absolute errors cannot be catastrophic, whatever the ratio.
+  if (evLoss < 0.1) i = Math.min(i, 1);
+  else if (evLoss < 0.5) i = Math.min(i, 3);
+  // Ceiling: large absolute errors cannot be flawless, whatever the ratio.
+  if (evLoss >= 2) i = Math.max(i, 3);
+
+  return GRADES[i];
 }
 
-/** Two actions this close are the same decision; calling one wrong is noise. */
-const INDIFFERENT_BB = 0.05;
+/**
+ * Two actions this close are the same decision.
+ *
+ * Also expressed as a share of the pot. A coach that flags noise as error is a
+ * coach the student stops believing, and once they stop believing one label
+ * they discount every label after it.
+ */
+const INDIFFERENT = 0.005;
 
 /** Thousands separators. "40000 runouts" reads as a typo; "40,000" reads as a count. */
 const num = (n) => n.toLocaleString('en-US');
@@ -198,13 +238,23 @@ export function analyse(spot) {
 
   options.sort((a, b) => b.ev - a.ev);
   const best = options[0];
-  const mixed = options.filter((o) => best.ev - o.ev <= INDIFFERENT_BB);
+  // The indifference band scales with the pot, so "these are the same
+  // decision" means the same thing in a 3bb pot and a 90bb one.
+  const potBb = Math.max(1, bb(potFacing));
+  const mixed = options.filter((o) => (best.ev - o.ev) / potBb <= INDIFFERENT);
 
-  return {
+  const analysis = {
     street,
+    // The pot in big blinds, carried through so grading can normalise by it
+    // rather than treating every big blind as equally important.
+    potBb,
     hand: {
       class: classOf(hole[0], hole[1]),
       made: board.length >= 3 ? describe([...hole, ...board]) : null,
+      // The category as a number as well as a name: "Two pair, sixes and
+      // fours" is for the player, and the ordinal is what lets the syllabus
+      // ask questions like "is this a bluff-catcher".
+      madeCategory: madeCat,
       draws: outs?.draws ?? [],
     },
     position: POSITION_NAME[position] ?? position,
@@ -223,6 +273,124 @@ export function analyse(spot) {
     mixed: mixed.length > 1 ? mixed.map((o) => o.move) : null,
     opponents,
   };
+
+  // The lesson is attached LAST, because it reads the finished analysis. This
+  // is the part that turns a readout into teaching: one named idea, the one
+  // number that expresses it here, and what that number means in words.
+  const ranked = conceptsFor(spot, analysis);
+  analysis.concepts = ranked.map((r) => r.concept.id);
+  analysis.lesson = ranked.length ? lessonFor(ranked[0].concept, spot, analysis) : null;
+  return analysis;
+}
+
+/**
+ * One concept, grounded in this exact spot.
+ *
+ * The generic statement of an idea is forgettable; the same idea with your
+ * cards and your price in it is not. So every lesson carries both — `idea` is
+ * the transferable sentence and `point` is what it means right now.
+ */
+function lessonFor(concept, spot, a) {
+  return {
+    id: concept.id,
+    name: concept.name,
+    stage: concept.stage,
+    idea: concept.idea,
+    rule: concept.rule,
+    why: concept.why,
+    trap: concept.trap,
+    // The headline: one number, and what it is telling you.
+    metric: metricFor(concept, spot, a),
+    point: pointFor(concept, spot, a),
+  };
+}
+
+/** The single number this concept is about, in this spot. */
+function metricFor(concept, spot, a) {
+  const pct = (x) => `${(x * 100).toFixed(0)}%`;
+  switch (concept.id) {
+    case 'potOdds':
+    case 'mdf':
+    case 'bluffCatching':
+      return { value: pct(a.required), label: 'you need', exact: true };
+    case 'outs':
+    case 'oneCard':
+    case 'impliedOdds':
+      return { value: `${a.outs?.strongOuts ?? 0}`, label: 'outs', exact: true };
+    case 'spr':
+      return { value: Number.isFinite(a.spr) ? a.spr.toFixed(1) : '—', label: 'SPR', exact: true };
+    case 'position':
+    case 'realisation':
+      return { value: pct(Math.max(0, Math.min(1, a.equity.equity * 1))), label: 'raw equity', exact: a.equity.exact };
+    case 'foldEquity':
+      return { value: pct(alpha(spot.toCall > 0 ? spot.toCall : Math.round(spot.pot * 0.66), Math.max(1, spot.pot - spot.toCall))), label: 'must work', exact: true };
+    default:
+      return { value: pct(a.equity.equity), label: 'your equity', exact: a.equity.exact };
+  }
+}
+
+/** What that number means, here, in one sentence a person would say out loud. */
+function pointFor(concept, spot, a) {
+  const pct = (x) => `${(x * 100).toFixed(0)}%`;
+  const eq = a.equity.equity;
+  const outs = a.outs?.strongOuts ?? 0;
+  const oneCard = outs / (spot.board.length === 4 ? 46 : 47);
+
+  switch (concept.id) {
+    case 'potOdds':
+      return `Calling ${Math.round(spot.toCall)} into ${Math.round(spot.pot)} means you need to win ${pct(a.required)} of the time. `
+        + `You win ${pct(eq)}, so this call ${eq > a.required ? 'makes money' : 'loses money'}.`;
+    case 'outs':
+    case 'oneCard':
+      return `${outs} cards make your hand. That is ${outs}/${spot.board.length === 4 ? 46 : 47} = ${pct(oneCard)} for the next card, `
+        + `against the ${pct(a.required)} you need — ${oneCard > a.required ? 'enough' : 'not enough on price alone'}.`;
+    case 'impliedOdds':
+      return `${pct(oneCard)} does not cover the ${pct(a.required)} you need right now. This call is only right if hitting it `
+        + 'wins you enough on later streets to make up the difference.';
+    case 'mdf':
+      return `Their bet needs to work ${pct(alpha(spot.toCall, Math.max(1, spot.pot - spot.toCall)))} of the time to break even, `
+        + `so you have to continue with about ${pct(mdf(spot.toCall, Math.max(1, spot.pot - spot.toCall)))} of your range — not of this hand.`;
+    case 'bluffCatching':
+      return `This hand beats every bluff and loses to every value bet, so its strength is beside the point. `
+        + `The question is whether ${pct(a.required)} of their bets here are bluffs.`;
+    case 'position':
+      return a.realisation < 1
+        ? `Out of position you collect about ${pct(a.realisation)} of your equity, so ${pct(eq)} plays like ${pct(Math.max(0, Math.min(1, a.equity.equity * a.realisation)))}.`
+        : `Acting last, you collect more than your share — ${pct(eq)} plays like more than that because you control the pot.`;
+    case 'realisation':
+      return `${pct(eq)} raw is not what you collect. Out of position, treat it as the lower number and fold the spots that are close.`;
+    case 'openingRanges':
+      return `From ${a.position} the standard opening range is about ${pct(openWidth(spot.position))} of hands. `
+        + `${a.hand.class} is ${a.best.move === 'raise' ? 'inside it' : 'outside it'}.`;
+    case 'blindDefence':
+      return `Already in for a blind, the price is only ${pct(a.required)} — almost any two cards clear that. `
+        + 'What decides it is playing the rest of the hand out of position.';
+    case 'domination':
+      return `${a.hand.class} makes top pair often and is beaten by every hand that calls a raise with the same top card. `
+        + 'It wins small pots and loses big ones.';
+    case 'valueBetting':
+      return `You are ahead of ${pct(eq)} of what they can hold. Name a worse hand that calls — if you can, bet it.`;
+    case 'showdownValue':
+      return `${pct(eq)} wins often enough to see a showdown and not often enough to bet. Betting folds out the hands you beat.`;
+    case 'semiBluff':
+      return `${outs} outs is ${pct(oneCard)} to improve, and betting adds the times they simply fold. `
+        + 'That second way of winning is why this is a bet rather than a call.';
+    case 'foldEquity':
+      return 'With little equity, a bet only makes money when they fold. Work out how often it has to work before you make it.';
+    case 'boardTexture':
+      return spot.board.length >= 3
+        ? 'Ask how many of their hands this flop helps. The fewer it helps, the smaller the bet that does the job.'
+        : '';
+    case 'spr':
+      return `${Number.isFinite(a.spr) ? a.spr.toFixed(1) : '—'} pots left behind. ${commitmentAdvice(a.spr).text}`;
+    default:
+      return `You win ${pct(eq)} against the hands they can actually have here.`;
+  }
+}
+
+/** Standard opening width by seat, for the lesson text to quote. */
+function openWidth(position) {
+  return { UTG: 0.17, HJ: 0.214, CO: 0.278, BTN: 0.433, SB: 0.409 }[position] ?? 0.25;
 }
 
 /**
@@ -242,7 +410,7 @@ export function analyse(spot) {
  */
 function preflopOptions(spot, { eq, bb, realisation }) {
   const {
-    hole, position, toCall, canRaise, minRaiseTo, maxRaiseTo, bigBlind, pot,
+    hole, position, toCall, canCheck, canRaise, minRaiseTo, maxRaiseTo, bigBlind, pot,
     opponents = 1,
   } = spot;
   const cls = classOf(hole[0], hole[1]);
@@ -281,7 +449,10 @@ function preflopOptions(spot, { eq, bb, realisation }) {
             + `${(realised * 100).toFixed(1)}% effective. ${cls} is outside the chart here.`
           : `${cls} is outside the chart here.`,
     });
-  } else {
+  } else if (canCheck) {
+    // Guarded on canCheck rather than on toCall alone: they are the same thing
+    // at a real table, but an engine that ever disagrees would have the coach
+    // recommend an action the server would reject.
     out.push({
       move: 'check',
       ev: 0.02,
@@ -427,27 +598,61 @@ function postflopOptions(spot, { eq, realised, outs, required, realisation, bb, 
 export function grade(analysis, taken) {
   const chosen = analysis.options.find((o) => o.move === taken.move) ?? { ev: -1, move: taken.move };
   const loss = Math.max(0, analysis.best.ev - chosen.ev);
+  // The grading quantity: what the error cost as a share of what was at stake.
+  const severity = loss / analysis.potBb;
 
   // An action inside the indifference band is not an error, however the
   // arithmetic came out.
   const indifferent = analysis.mixed?.includes(taken.move);
-  const g = indifferent ? GRADES[0] : gradeFor(loss);
+  const g = indifferent ? GRADES[0] : gradeFor(severity, loss);
+  const matched = chosen.move === analysis.best.move;
 
   return {
     grade: g.id,
     label: g.label,
+    // Both numbers. `evLoss` is what a poker player understands and what the
+    // session total is summed in; `severity` is what the label was decided by.
     evLoss: indifferent ? 0 : loss,
+    severity: indifferent ? 0 : severity,
     best: analysis.best.move,
     bestSize: analysis.best.to ?? null,
     chosen: taken.move,
     indifferent: Boolean(indifferent),
+    // The headline sentence. Never second person about the player — a label is
+    // a property of the move. "Folding costs 0.4bb here" teaches; "you keep
+    // over-folding" is about the person and measurably makes people worse.
+    verdict: indifferent
+      ? `${analysis.mixed.join(' and ')} are worth the same here.`
+      : matched
+        ? `${cap(analysis.best.move)} is the best line here.`
+        : `${cap(analysis.best.move)}${analysis.best.to ? ` to ${analysis.best.to}` : ''} was better.`,
     why: indifferent
-      ? `${analysis.mixed.join(' and ')} are worth the same here. Either is fine.`
-      : chosen.move === analysis.best.move
+      ? 'This spot is close to indifferent — either choice costs a fraction of a big blind.'
+      : matched
         ? analysis.best.why
-        : `${analysis.best.move} is better by ${loss.toFixed(2)}bb. ${analysis.best.why}`,
+        : analysis.best.why,
+    // The concept the spot was teaching, carried onto the feedback screen so
+    // the student leaves with an idea rather than with an arithmetic result.
+    lesson: analysis.lesson ?? null,
     leak: chosen.leak ?? null,
   };
+}
+
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+/**
+ * A graded decision as a mastery signal in 0..1.
+ *
+ * Not the raw EV loss. Mastery is a claim about whether you understand an
+ * idea, and understanding is not linear in big blinds: the gap between losing
+ * 0.02bb and 0.2bb is the difference between right and slightly loose, while
+ * the gap between 2bb and 20bb is the difference between wrong and wrong. So
+ * this maps the grade BANDS onto a scale, which is the same reason chess
+ * grades a move by its win-probability drop rather than by centipawns.
+ */
+export function qualityOf(graded) {
+  if (graded.indifferent) return 1;
+  return GRADES.find((g) => g.id === graded.grade)?.quality ?? 0;
 }
 
 /**

@@ -23,8 +23,9 @@ import { makeRng, randInt, shuffle } from '../../shared/rng.js';
 import { clampInt, oneOf } from '../engine.js';
 import * as holdem from './index.js';
 import { PERSONALITIES, PERSONALITY_IDS, applyResult, decide, makeBot } from './bots.js';
-import { analyse, emptyScorecard, grade, record, summarise } from './coach.js';
-import { POSITIONS } from './ranges.js';
+import { analyse, emptyScorecard, grade, qualityOf, record, summarise } from './coach.js';
+import { emptyMastery, progress, recordMastery } from './concepts.js';
+import { POSITION_NAME, POSITIONS } from './ranges.js';
 
 export const meta = {
   id: 'pokerlab',
@@ -40,11 +41,29 @@ export const meta = {
   solo: true,
 };
 
+/**
+ * Coaching modes.
+ *
+ * `learn` is the default and it is the one that actually teaches. You see only
+ * what exists at a real table, you commit, and THEN you get the numbers and
+ * the reasoning. The evidence for that ordering is unusually strong: feedback
+ * reliably helps only when the learner attempted the problem first, and being
+ * shown the answer before committing turns "play poker" into "read a
+ * dashboard", which is a different skill and does not transfer to a table
+ * where the dashboard is absent.
+ *
+ * `guided` shows the numbers while you decide. It is genuinely useful for a
+ * first session — you cannot commit to an answer in a language you do not
+ * speak yet — and it is what most poker software does. It is not the default,
+ * because staying in it is how people plateau.
+ */
+export const COACH_MODES = ['learn', 'guided', 'off'];
+
 export const defaultConfig = {
   startingStack: 2000,
   actionSeconds: 0, // no clock: this is practice, thinking is the point
   table: 'mixed',
-  coach: 'full',
+  coach: 'learn',
 };
 
 export function normalizeConfig(config) {
@@ -52,7 +71,13 @@ export function normalizeConfig(config) {
     startingStack: clampInt(config.startingStack, 500, 20000, 2000),
     actionSeconds: 0,
     table: oneOf(config.table, ['mixed', 'loose', 'tough'], 'mixed'),
-    coach: oneOf(config.coach, ['full', 'quiet'], 'full'),
+    // 'full' and 'quiet' were the old names; keep them working rather than
+    // silently resetting a room that was configured before this existed.
+    coach: oneOf(
+      { full: 'guided', quiet: 'off' }[config.coach] ?? config.coach,
+      COACH_MODES,
+      'learn',
+    ),
   };
 }
 
@@ -99,7 +124,16 @@ export function start(room, seed, now) {
     bots: Object.fromEntries(bots.map((b, i) => [b.id, makeBot(b.id, b.personality, (seed ^ (i * 2654435761)) >>> 0)])),
     humanIds: humans.map((p) => p.id),
     scorecards: Object.fromEntries(humans.map((p) => [p.id, emptyScorecard()])),
+    // What each student has actually learned, per named concept, rather than
+    // one undifferentiated "you lose 8bb/100". A score you cannot act on is
+    // not feedback.
+    mastery: Object.fromEntries(humans.map((p) => [p.id, emptyMastery()])),
     advice: null,
+    // The analysis that produced the last grade, kept so the feedback screen
+    // can show what each line was worth. It is sent UNREDACTED whatever the
+    // mode — the whole point of learn mode is that the numbers arrive the
+    // moment you have committed, not that they never arrive.
+    lastAdvice: null,
     lastGrade: null,
     // Held back until the hand is over, so the runout never colours the grade.
     pending: [],
@@ -157,7 +191,10 @@ function refreshAdvice(room, now) {
     return;
   }
   const seat = g.seats[g.actor];
-  if (isBot(room, seat.id) || room.config.coach === 'quiet') {
+  // The analysis is still computed in `learn` mode — it has to be, because the
+  // grade that lands the moment you act is derived from it. What changes is
+  // how much of it viewFor is willing to put on the wire before you commit.
+  if (isBot(room, seat.id) || room.config.coach === 'off') {
     g.lab.advice = null;
     return;
   }
@@ -208,15 +245,24 @@ export function action(room, playerId, act, now) {
 
     // Grade BEFORE the action resolves, while the spot still exists.
     let graded = null;
-    if (g.lab.advice) {
-      graded = grade(g.lab.advice, { move: act.move, to: act.to });
+    const advice = g.lab.advice;
+    if (advice) {
+      graded = grade(advice, { move: act.move, to: act.to });
       record(g.lab.scorecards[playerId] ?? emptyScorecard(), graded);
+      // Credit the concept the spot was actually teaching. The lesson is
+      // chosen from the spot, not from what the player did, so a fold and a
+      // call in the same spot advance the same idea — one of them further.
+      const learning = g.lab.mastery[playerId];
+      if (learning && advice.lesson) {
+        recordMastery(learning, advice.lesson.id, qualityOf(graded));
+      }
     }
 
     const outcome = holdem.action(room, playerId, act, now);
     if (outcome.error) return outcome;
 
     g.lab.lastGrade = graded;
+    g.lab.lastAdvice = graded ? advice : null;
     return afterAnyAction(room, now, outcome);
   }
 
@@ -224,6 +270,7 @@ export function action(room, playerId, act, now) {
     if (g.phase !== 'handover') return { error: 'wrong_phase' };
     g.lab.revealBots = false;
     g.lab.lastGrade = null;
+    g.lab.lastAdvice = null;
     const outcome = holdem.action(room, playerId, act, now) ?? {};
     return afterAnyAction(room, now, outcome);
   }
@@ -270,6 +317,7 @@ export function onDeadline(room, now) {
     const outcome = holdem.onDeadline(room, now) ?? {};
     g.lab.revealBots = false;
     g.lab.lastGrade = null;
+    g.lab.lastAdvice = null;
     return afterAnyAction(room, now, outcome);
   }
 
@@ -306,6 +354,27 @@ function settleTilt(room) {
 
 // --------------------------------------------------------------------- view --
 
+/**
+ * How much of the analysis a mode is willing to show BEFORE you act.
+ *
+ * `learn` sends the name of the concept and nothing else — no equity, no
+ * price, no recommended action, no option list. A curious player cannot read
+ * the answer out of the network tab, because the answer was never sent.
+ */
+function forMode(advice, mode) {
+  if (!advice) return null;
+  if (mode !== 'learn') return advice;
+  return {
+    prompt: true,
+    street: advice.street,
+    position: advice.position,
+    // Feed-up only: what this decision is testing, never what the answer is.
+    lesson: advice.lesson
+      ? { id: advice.lesson.id, name: advice.lesson.name, stage: advice.lesson.stage }
+      : null,
+  };
+}
+
 export function viewFor(room, viewerId) {
   const g = room.game;
   const base = holdem.viewFor(room, viewerId);
@@ -330,10 +399,26 @@ export function viewFor(room, viewerId) {
         hole: lab.revealBots || s.id === viewerId ? s.hole : null,
       };
     }),
-    advice: g.actor >= 0 && g.seats[g.actor]?.id === viewerId ? lab.advice : null,
+    // THE REDACTION THAT MAKES IT A TRAINER RATHER THAN A CALCULATOR.
+    //
+    // In `learn` mode the numbers do not go on the wire until you have acted.
+    // Not hidden by CSS, not collapsed behind a tap — absent, the same way a
+    // real table is absent of them. What you do get is the name of the idea
+    // the spot is testing, which is the "where am I going" half of feedback
+    // and costs nothing pedagogically because it does not contain the answer.
+    advice: g.actor >= 0 && g.seats[g.actor]?.id === viewerId
+      ? forMode(lab.advice, room.config.coach)
+      : null,
+    coach: room.config.coach,
     lastGrade: lab.lastGrade,
+    lastAdvice: lab.lastAdvice,
     revealed: lab.revealBots,
     scorecard: summarise(lab.scorecards[viewerId] ?? emptyScorecard()),
+    // Where you are sitting, in poker words. Preflop this is the most useful
+    // sentence available beside your cards, and the shared hold'em row had
+    // "Waiting for the flop" there instead.
+    myPosition: me ? POSITION_NAME[positionOf(g, g.seats.indexOf(me))] ?? null : null,
+    course: progress(lab.mastery?.[viewerId] ?? emptyMastery()),
     myStack: me?.stack ?? 0,
   };
 }

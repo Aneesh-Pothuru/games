@@ -106,7 +106,11 @@ describe('registration', () => {
     assert.equal(lab.normalizeConfig({ startingStack: -5 }).startingStack, 500);
     assert.equal(lab.normalizeConfig({ startingStack: 'lots' }).startingStack, 2000);
     assert.equal(lab.normalizeConfig({ table: 'nonsense' }).table, 'mixed');
-    assert.equal(lab.normalizeConfig({ coach: 'nonsense' }).coach, 'full');
+    assert.equal(lab.normalizeConfig({ coach: 'nonsense' }).coach, 'learn');
+    assert.equal(lab.normalizeConfig({}).coach, 'learn', 'commit-then-see is the default');
+    // Rooms configured before the modes were renamed keep working.
+    assert.equal(lab.normalizeConfig({ coach: 'full' }).coach, 'guided');
+    assert.equal(lab.normalizeConfig({ coach: 'quiet' }).coach, 'off');
   });
 
   test('there is no action clock, because thinking is the point', () => {
@@ -159,7 +163,7 @@ describe('seating', () => {
 
 describe('the coach panel', () => {
   test('advice is waiting the moment the first hand is dealt', () => {
-    const room = makeRoom();
+    const room = makeRoom({ config: { coach: 'guided' } });
     lab.start(room, 5, 1000);
     // Bots may act first depending on the button, so walk to the human's turn.
     let now = 1000;
@@ -174,21 +178,21 @@ describe('the coach panel', () => {
   });
 
   test('you only ever see advice for your own decision', () => {
-    const room = makeRoom();
+    const room = makeRoom({ config: { coach: 'guided' } });
     lab.start(room, 5, 1000);
     const botId = room.players.find((p) => p.bot).id;
     assert.equal(lab.viewFor(room, botId).advice, null, 'a bot must not be handed the answer');
   });
 
-  test('quiet mode turns the coach off without breaking the table', () => {
-    const room = makeRoom({ config: { coach: 'quiet' } });
+  test('turning the coach off does not break the table', () => {
+    const room = makeRoom({ config: { coach: 'off' } });
     lab.start(room, 5, 1000);
     drive(room, passive, { hands: 2 });
     assert.equal(lab.viewFor(room, HUMAN).advice, null);
   });
 
   test('the advice names the position in words and the hand by class', () => {
-    const room = makeRoom();
+    const room = makeRoom({ config: { coach: 'guided' } });
     lab.start(room, 12, 1000);
     let now = 1000;
     for (let i = 0; i < 40 && room.game.seats[room.game.actor]?.id !== HUMAN; i++) {

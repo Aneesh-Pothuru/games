@@ -39,9 +39,12 @@ await host.goto(`${BASE}/`);
 await host.waitForSelector('.gametile');
 const tiles = await host.locator('.gametile').allInnerTexts();
 check('poker is on the home screen', tiles.some((t) => /Hold’em|Hold'em/.test(t)), tiles.join(' | ').slice(0, 200));
+check('and the trainer sits beside it', (await host.locator('.gametile[data-game="pokerlab"]').count()) === 1);
 check('and names itself as poker', tiles.some((t) => /Poker/i.test(t)));
 
-await host.locator('.gametile', { hasText: 'Hold' }).click();
+// By id, not by text: the Lab's blurb also says "hold'em", so a text match
+// resolves to two tiles and fails in strict mode.
+await host.locator('.gametile[data-game="holdem"]').click();
 await host.fill('#startbar-name', 'Ana');
 await host.locator('.bar--bottom .btn--primary').click();
 await host.waitForSelector('.roomcode', { timeout: 15000 });

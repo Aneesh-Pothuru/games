@@ -35,7 +35,7 @@ const tiles = await host.locator('.gametile').allInnerTexts();
 check('cheat is on the home screen', tiles.some((t) => /Cheat/.test(t)), tiles.join('|').slice(0, 160));
 check('and names what people call it', tiles.some((t) => /BS/.test(t)));
 
-await host.locator('.gametile', { hasText: 'Cheat' }).click();
+await host.locator('.gametile[data-game="cheat"]').click();
 await host.fill('#startbar-name', 'Ana');
 await host.locator('.bar--bottom .btn--primary').click();
 await host.waitForSelector('.roomcode', { timeout: 15000 });

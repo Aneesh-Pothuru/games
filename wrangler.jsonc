@@ -1,6 +1,8 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "parlor-games",
+  // Must match the connected Cloudflare Workers service, or a Git-integrated
+  // build deploys to the wrong place (or fails outright).
+  "name": "games",
   "main": "src/index.js",
   // Comfortably past every default we depend on: delete_all_deletes_alarm
   // (>= 2026-02-24) and web_socket_auto_reply_to_close (>= 2026-04-07).

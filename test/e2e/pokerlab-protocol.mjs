@@ -133,28 +133,41 @@ if (dealt) {
   //
   // Not every hand gives you one: if all three bots fold to your big blind you
   // win the blinds without acting, and the hand is over before any advice
-  // exists. Waiting on a single hand made this suite fail roughly one run in
-  // five, and it failed with "the table stalled on a bot", which is a
-  // completely different and much more alarming bug than the one that was
-  // happening.
+  // exists. Two things make this fiddly and both bit:
+  //
+  //   the table can already BE at handover before this loop starts, so a
+  //   cursor that only looks at new frames waits for one that is not coming
+  //   until the 60-second auto-deal fires;
+  //
+  //   and when it fails it must say what the table was actually doing, or a
+  //   test that is merely unlucky reports "the table stalled on a bot", which
+  //   is a completely different and much more alarming bug.
+  const latest = () => [...frames].reverse().find((f) => f.view)?.view ?? null;
+  const nextFrame = (ms) => {
+    const at = frames.length;
+    return seen((f, i) => i >= at && f.view, ms);
+  };
+
   let advised = null;
-  for (let hand = 0; hand < 8 && !advised; hand++) {
-    const seenBefore = frames.length;
-    const next = await Promise.race([
-      seen((f, i) => i >= seenBefore && f.view?.advice, 45_000),
-      seen((f, i) => i >= seenBefore && f.view?.phase === 'handover', 45_000),
-    ]);
-    if (!next) break;
-    if (next.view.advice) {
-      advised = next;
+  for (let step = 0; step < 24 && !advised; step++) {
+    const now = latest();
+    if (now?.advice) {
+      advised = { view: now };
       break;
     }
-    // Nobody gave us a decision that hand. Deal the next one.
-    ws.send(JSON.stringify({ t: 'action', action: { type: 'deal' } }));
-    await new Promise((r) => setTimeout(r, 400));
+    if (now?.phase === 'handover') {
+      ws.send(JSON.stringify({ t: 'action', action: { type: 'deal' } }));
+      await nextFrame(10_000);
+      continue;
+    }
+    // Mid-hand: the bots are on the clock. Wait for the table to move.
+    if (!(await nextFrame(15_000))) break;
   }
+
+  const at = latest();
   check('the bots act on their own and the action reaches you', Boolean(advised),
-    'no decision reached the human in eight hands — the table stalled on a bot');
+    at ? `table was: phase=${at.phase} street=${at.street} hand=${at.handNo} `
+      + `actor=${at.actor ?? 'none'} myTurn=${at.myTurn}` : 'no view frame at all');
 
   if (advised) {
     const a = advised.view.advice;

@@ -168,11 +168,12 @@
 /* Per-game identity: exactly two knobs — an accent and an emblem. Everything
    else is shared, which is what keeps N games at one stylesheet. */
 [data-game='oddoneout'] { --game-accent: #45d6e8; }
+[data-game='spectrum']  { --game-accent: #e48fd6; }
+[data-game='nightfall'] { --game-accent: #7c6bff; }
+[data-game='cheat']     { --game-accent: #3fd98b; }
+[data-game='holdem']    { --game-accent: #d94f4f; }
 [data-game='council']   { --game-accent: #e8b84b; }
 [data-game='sabotage']  { --game-accent: #ff7a45; }
-[data-game='nightfall'] { --game-accent: #7c6bff; }
-[data-game='oneword']   { --game-accent: #3fd98b; }
-[data-game='oddprompt'] { --game-accent: #e48fd6; }
 
 /* ----------------------------------------------------------------- reset -- */
 *, *::before, *::after { box-sizing: border-box; }

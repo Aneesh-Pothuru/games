@@ -162,7 +162,14 @@ function peekChip(label, tone) {
     }
   });
   // Never leave a secret on screen when the phone is put down or backgrounded.
-  document.addEventListener('visibilitychange', hide);
+  // A fresh chip is built on every render, so the listener retires itself once
+  // its chip is no longer in the document rather than piling up against nodes
+  // that no longer exist.
+  const onHidden = () => {
+    if (chip.isConnected) hide();
+    else document.removeEventListener('visibilitychange', onHidden);
+  };
+  document.addEventListener('visibilitychange', onHidden);
   return chip;
 }
 
@@ -918,6 +925,9 @@ function sabotageResult(ctx, v) {
 
 // ----------------------------------------------------------------- spectrum --
 
+/** The psychic's half-typed clue, held outside the render tree. */
+let clueDraft = '';
+
 const spectrum = {
   roleChip: (ctx) =>
     ctx.view?.amPsychic ? el('span', { class: 'chip', style: 'color:var(--game-accent)' }, ['Psychic']) : null,
@@ -949,6 +959,12 @@ const spectrum = {
                 el('input', {
                   class: 'input', id: 'clue', maxlength: '60', autofocus: true,
                   placeholder: 'One word or short phrase',
+                  // Mirrored, like every other field in the app. This was the
+                  // one input whose only copy lived in the DOM, so anything
+                  // that rebuilt the tree — a broadcast, a reconnect, tabbing
+                  // away to look a word up — silently threw the clue away.
+                  value: clueDraft,
+                  oninput: (e) => { clueDraft = e.target.value; },
                 }),
               ])
             : [waiting(`${ctx.nameOf(ctx, v.psychic)} is thinking of a clue.`), dial],
@@ -1009,8 +1025,12 @@ const spectrum = {
         if (!v.amPsychic) return waitingBar(`Waiting for ${ctx.nameOf(ctx, v.psychic)}`);
         return bottom([primary('Give this clue', {
           onclick: () => {
-            const input = document.getElementById('clue');
-            if (input?.value.trim()) ctx.send({ type: 'clue', clue: input.value });
+            // Read the live field if it is still there, fall back to the draft
+            // if this handler outlived its own input.
+            const clue = (document.getElementById('clue')?.value ?? clueDraft).trim();
+            if (!clue) return toast('Type a clue first');
+            clueDraft = '';
+            ctx.send({ type: 'clue', clue });
           },
         })]);
 

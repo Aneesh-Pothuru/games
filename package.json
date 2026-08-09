@@ -10,7 +10,7 @@
     "test": "node --test \"test/**/*.test.js\"",
     "test:watch": "node --test --watch \"test/**/*.test.js\"",
     "test:protocol": "node test/e2e/protocol.mjs",
-    "test:browser": "node test/e2e/browser.mjs && node test/e2e/nightfall-browser.mjs && node test/e2e/poker-browser.mjs && node test/e2e/cheat-browser.mjs",
+    "test:browser": "node test/e2e/browser.mjs && node test/e2e/typing.mjs && node test/e2e/nightfall-browser.mjs && node test/e2e/poker-browser.mjs && node test/e2e/cheat-browser.mjs",
     "test:journeys": "node test/e2e/journeys.mjs"
   },
   "devDependencies": {

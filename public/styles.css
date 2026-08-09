@@ -603,6 +603,9 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
   background: var(--bg-overlay); box-shadow: inset 0 0 0 var(--hair) var(--line-2);
   font-size: var(--t-xs); font-weight: 600;
 }
+/* A chip that is actually tappable needs a real target (WCAG 2.5.5 / HIG 44pt),
+   even though a chip used as a static label does not. */
+button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 
 /* --------------------------------------------------------------- banners -- */
 .banner {
@@ -636,13 +639,17 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 }
 @keyframes wash { 50% { opacity: 0.05; } }
 
+/* Scope the layout to [open]: a bare `display:flex` on the element would beat
+   the UA's `dialog:not([open]) { display: none }` and leave the sheet
+   permanently stuck to the bottom of every screen. */
 .sheet {
   width: 100%; max-width: var(--shell); margin: auto auto 0;
   max-height: 86dvh; padding: 0; border: 0;
   border-radius: var(--r-5) var(--r-5) 0 0;
   background: var(--bg-overlay); color: var(--text-1);
-  box-shadow: var(--e-4); display: flex; flex-direction: column;
+  box-shadow: var(--e-4);
 }
+.sheet[open] { display: flex; flex-direction: column; }
 .sheet::backdrop { background: var(--scrim); }
 .sheet__grab {
   width: 40px; height: 4px; border-radius: 2px; background: var(--line-strong);
@@ -686,9 +693,11 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 }
 .gametile:active { transform: translateY(1px) scale(0.99); box-shadow: var(--press); }
 .gametile.is-selected { box-shadow: var(--e-2), inset 0 0 0 2px var(--game-accent); }
-.gametile__emblem { width: 44px; height: 44px; flex: 0 0 auto; color: var(--game-accent); }
-.gametile__name { font-size: var(--t-lg); font-weight: 700; line-height: 1.15; }
-.gametile__meta { font-size: var(--t-xs); color: var(--text-3); }
+.gametile { align-items: flex-start; }
+.gametile__emblem { width: 40px; height: 40px; flex: 0 0 auto; color: var(--game-accent); margin-top: 2px; }
+/* These are spans inside a span, so they need to be told to stack. */
+.gametile__name { display: block; font-size: var(--t-lg); font-weight: 700; line-height: 1.15; }
+.gametile__meta { display: block; font-size: var(--t-xs); color: var(--text-3); margin-top: 2px; }
 
 .secret {
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);

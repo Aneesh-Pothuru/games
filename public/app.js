@@ -34,6 +34,10 @@ const state = {
   busy: false,
   revealed: false,
   clockOffset: 0,
+  // Form fields live in state, not only in the DOM: a re-render rebuilds the
+  // inputs, and anything typed but unsaved would otherwise be silently lost.
+  name: recalledName(),
+  codeEntry: '',
 };
 
 // --------------------------------------------------------------------- boot --
@@ -183,15 +187,18 @@ function shell({ top, body, bottom }) {
 function homeScreen() {
   const nameInput = el('input', {
     class: 'input', id: 'name', maxlength: '14', autocomplete: 'nickname',
-    placeholder: 'Your name (so people know it’s you)', value: recalledName(),
+    placeholder: 'Your name (so people know it’s you)', value: state.name,
+    oninput: (e) => { state.name = e.target.value; },
   });
   const codeInput = el('input', {
     class: 'input input--code', id: 'code', maxlength: '4', inputmode: 'text',
     enterkeyhint: 'go', autocomplete: 'off', autocapitalize: 'characters',
-    autocorrect: 'off', spellcheck: 'false', placeholder: '••••',
+    autocorrect: 'off', spellcheck: 'false', placeholder: '••••', value: state.codeEntry,
     oninput: (e) => {
       e.target.value = e.target.value.toUpperCase().replace(/[^BCDFGHJKMNPQRSTVWXYZ]/g, '').slice(0, 4);
+      state.codeEntry = e.target.value;
     },
+    onkeydown: (e) => { if (e.key === 'Enter') doJoin(state.codeEntry, state.name); },
   });
 
   const tiles = state.games.map((g) =>
@@ -227,7 +234,7 @@ function homeScreen() {
         codeInput,
         el('button', {
           class: 'btn btn--secondary btn--block',
-          onclick: () => doJoin(codeInput.value, nameInput.value),
+          onclick: () => doJoin(state.codeEntry, state.name),
         }, ['Join room']),
       ]),
       el('div', { class: 'label', text: 'Or start a new one' }),
@@ -238,7 +245,7 @@ function homeScreen() {
       el('button', {
         class: 'btn btn--primary btn--block',
         disabled: !state.picked || state.busy,
-        onclick: () => doCreate(nameInput.value),
+        onclick: () => doCreate(state.name),
       }, [state.picked ? `Start ${state.games.find((g) => g.id === state.picked).name}` : 'Pick a game']),
     ]),
   });
@@ -247,7 +254,9 @@ function homeScreen() {
 function joinScreen() {
   const nameInput = el('input', {
     class: 'input', id: 'name', maxlength: '14', autofocus: true,
-    placeholder: 'Your name', value: recalledName(),
+    placeholder: 'Your name', value: state.name,
+    oninput: (e) => { state.name = e.target.value; },
+    onkeydown: (e) => { if (e.key === 'Enter') doJoin(state.code, state.name); },
   });
   return shell({
     top: el('header', { class: 'bar bar--top' }, [el('span', { class: 'label', text: 'Parlour' }), themeToggle()]),
@@ -260,7 +269,7 @@ function joinScreen() {
       el('button', {
         class: 'btn btn--primary btn--block',
         disabled: state.busy,
-        onclick: () => doJoin(state.code, nameInput.value),
+        onclick: () => doJoin(state.code, state.name),
       }, ['Go — join game']),
     ]),
   });

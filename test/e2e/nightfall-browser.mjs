@@ -18,9 +18,9 @@ for (let i=0;i<6;i++){
 const host = pages[0];
 await host.goto('http://localhost:8787/');
 await host.waitForSelector('.gametile');
-check('Nightfall is listed', await host.locator('.gametile', {hasText:'Nightfall'}).count() === 1);
+check('Nightfall is listed', await host.locator('.gametile[data-game="nightfall"]').count() === 1);
 
-await host.locator('.gametile', {hasText:'Nightfall'}).click();
+await host.locator('.gametile[data-game="nightfall"]').click();
 await host.fill('#startbar-name','Ana');
 await host.locator('.bar--bottom .btn--primary').click();
 await host.waitForSelector('.roomcode');

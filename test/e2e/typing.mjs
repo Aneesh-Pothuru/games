@@ -34,7 +34,7 @@ const [host, ...rest] = pages;
 
 await host.goto(`${BASE}/`);
 await host.waitForSelector('.gametile');
-await host.locator('.gametile', { hasText: 'Spectrum' }).click();
+await host.locator('.gametile[data-game="spectrum"]').click();
 await host.fill('#startbar-name', 'Ana');
 await host.locator('.bar--bottom .btn--primary').click();
 await host.waitForSelector('.roomcode', { timeout: 15000 });

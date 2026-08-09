@@ -101,7 +101,7 @@ await host.screenshot({ path: `${OUT}/01-home.png` });
   await small.close();
 }
 
-await host.locator('.gametile', { hasText: 'The Council' }).click();
+await host.locator('.gametile[data-game="council"]').click();
 await host.fill('#startbar-name', 'Ana');
 await host.locator('.bar--bottom .btn--primary').click();
 await host.waitForSelector('.roomcode', { timeout: 10000 });

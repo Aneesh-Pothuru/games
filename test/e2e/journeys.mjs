@@ -34,11 +34,17 @@ async function newPhone(label) {
   return { ctx, page };
 }
 
-/** Create a room and return its code. */
-async function createRoom(page, gameText, name) {
+/**
+ * Create a room and return its code.
+ *
+ * Games are picked by their stable id, never by tile text: the home screen
+ * keeps growing and text matches start resolving to two tiles the moment one
+ * game's blurb mentions another's name.
+ */
+async function createRoom(page, gameId, name) {
   await page.goto(`${BASE}/`);
   await page.waitForSelector('.gametile');
-  await page.locator('.gametile', { hasText: gameText }).click();
+  await page.locator(`.gametile[data-game="${gameId}"]`).click();
   await page.fill('#startbar-name', name);
   await page.locator('.bar--bottom .btn--primary').click();
   await page.waitForSelector('.roomcode', { timeout: 15000 });
@@ -62,7 +68,7 @@ async function joinRoom(page, code, name) {
   // Before picking anything there is no bottom bar to read rules from — that
   // is fine, but once you pick a game the rules must be one tap away, without
   // having to create a room and gather five friends first.
-  await page.locator('.gametile', { hasText: 'Hold' }).click();
+  await page.locator('.gametile[data-game="holdem"]').click();
   const barText = await page.locator('.bar--bottom').innerText();
   check('J1 picking a game offers its rules', /how to play/i.test(barText), barText.replace(/\n/g, ' | '));
 
@@ -76,7 +82,7 @@ async function joinRoom(page, code, name) {
   await page.waitForTimeout(300);
 
   // Switching games must switch the rules, not keep showing the first one.
-  await page.locator('.gametile', { hasText: 'Spectrum' }).click();
+  await page.locator('.gametile[data-game="spectrum"]').click();
   await page.locator('.bar--bottom .btn--ghost').click();
   await page.waitForTimeout(400);
   const rules2 = await page.locator('#sheet-body').innerText();
@@ -88,7 +94,7 @@ async function joinRoom(page, code, name) {
 
 {
   const a = await newPhone('J2-host');
-  const code = await createRoom(a.page, 'Spectrum', 'Ana');
+  const code = await createRoom(a.page, 'spectrum', 'Ana');
 
   const b = await newPhone('J2-guest');
   await b.page.goto(`${BASE}/${code}`);
@@ -107,7 +113,7 @@ async function joinRoom(page, code, name) {
 
 {
   const a = await newPhone('J3-host');
-  const code = await createRoom(a.page, 'Spectrum', 'Ana');
+  const code = await createRoom(a.page, 'spectrum', 'Ana');
   const b = await newPhone('J3-guest');
   await joinRoom(b.page, code, 'Ben');
   await b.page.waitForSelector('.roomcode', { timeout: 15000 });
@@ -135,7 +141,7 @@ async function joinRoom(page, code, name) {
 
 {
   const a = await newPhone('J4-host');
-  const code = await createRoom(a.page, 'Spectrum', 'Ana');
+  const code = await createRoom(a.page, 'spectrum', 'Ana');
   const b = await newPhone('J4-b');
   await joinRoom(b.page, code, 'Ben');
   await b.page.waitForSelector('.roomcode', { timeout: 15000 });
@@ -178,7 +184,7 @@ async function joinRoom(page, code, name) {
 
 {
   const a = await newPhone('J5-host');
-  const code = await createRoom(a.page, 'Spectrum', 'Ana');
+  const code = await createRoom(a.page, 'spectrum', 'Ana');
   const b = await newPhone('J5-guest');
   await joinRoom(b.page, code, 'Ben');
   await b.page.waitForSelector('.roomcode', { timeout: 15000 });
@@ -216,7 +222,7 @@ async function joinRoom(page, code, name) {
   const a = await newPhone('J6-host');
   // Spectrum seats sixteen, so use a game with a small ceiling to keep this
   // quick: hold'em is nine-handed.
-  const code = await createRoom(a.page, 'Hold', 'Ana');
+  const code = await createRoom(a.page, 'holdem', 'Ana');
 
   const joiners = [];
   for (let i = 0; i < 8; i++) {

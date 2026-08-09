@@ -152,8 +152,14 @@ if (dealt) {
     check('every line is priced in big blinds',
       a.options.length >= 2 && a.options.every((o) => Number.isFinite(o.ev)),
       JSON.stringify(a.options.map((o) => [o.move, o.ev])));
-    check('folding is exactly zero',
-      a.options.find((o) => o.move === 'fold')?.ev === 0);
+    // Folding is exactly zero when it is a choice at all — and it is NOT a
+    // choice when checking is free, because folding instead of checking is the
+    // one strictly dominated action in poker.
+    const fold = a.options.find((o) => o.move === 'fold');
+    const canCheck = a.options.some((o) => o.move === 'check');
+    check(canCheck ? 'no fold is offered when checking is free' : 'folding is exactly zero',
+      canCheck ? fold === undefined : fold?.ev === 0,
+      JSON.stringify(a.options.map((o) => o.move)));
     check('the best line is the top of the list',
       a.options.every((o) => o.ev <= a.best.ev));
     // Never state a mixed spot as a pure one.

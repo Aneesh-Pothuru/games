@@ -2,7 +2,9 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "parlor-games",
   "main": "src/index.js",
-  "compatibility_date": "2026-08-09",
+  // Comfortably past every default we depend on: delete_all_deletes_alarm
+  // (>= 2026-02-24) and web_socket_auto_reply_to_close (>= 2026-04-07).
+  "compatibility_date": "2026-08-08",
 
   // Static assets are served free and unlimited on Workers, same as Pages.
   //

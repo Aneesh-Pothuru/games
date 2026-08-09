@@ -41,6 +41,23 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
 
+    // ---- game manifest ------------------------------------------------------
+    // Static, so it can be cached hard. Includes the rules text so the in-game
+    // "how to play" sheet works with no extra round trip.
+    if (pathname === '/api/games' && request.method === 'GET') {
+      return new Response(
+        JSON.stringify(
+          Object.values(GAMES).map((g) => ({ ...g.meta, rules: g.rulesText, defaults: g.defaultConfig })),
+        ),
+        {
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'public, max-age=300',
+          },
+        },
+      );
+    }
+
     // ---- create a lobby -----------------------------------------------------
     if (pathname === '/api/create' && request.method === 'POST') {
       const body = await readJson(request);

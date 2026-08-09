@@ -1,28 +1,128 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Games</title>
-  <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    body {
-      min-height: 100vh;
-      margin: 0;
-      display: grid;
-      place-items: center;
-      background: radial-gradient(circle at top, #1d4ed8, #0f172a 55%);
-      color: #f8fafc;
-    }
-    main { text-align: center; padding: 2rem; }
-    h1 { margin: 0; font-size: clamp(3rem, 12vw, 7rem); letter-spacing: -0.06em; }
-    p { margin: 1rem 0 0; color: #cbd5e1; font-size: 1.125rem; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Games</h1>
-    <p>Something fun is coming soon.</p>
-  </main>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover is REQUIRED or env(safe-area-inset-*) resolves to 0.
+         No user-scalable=no and no maximum-scale: iOS has ignored them since
+         iOS 10 anyway, and they fail WCAG 1.4.4. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0e14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="Hidden-role party games for a room full of phones. No app, no signup — just a room code." />
+    <title>Parlour — party games for a room full of phones</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0e14'/%3E%3Cpath d='M32 10 54 22v20L32 54 10 42V22Z' fill='none' stroke='%23e8b84b' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='6' fill='%23e8b84b'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <!-- Single inline sprite: same-document <use> is CSP-safe and costs zero
+         requests, and each symbol is defined once however many times it renders. -->
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5 9 17.5 20 6.5" /></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6 18 18M18 6 6 18" /></symbol>
+        <symbol id="i-eye" viewBox="0 0 24 24">
+          <path d="M2 12c2.7-4.3 6-6.5 10-6.5s7.3 2.2 10 6.5c-2.7 4.3-6 6.5-10 6.5S4.7 16.3 2 12Z" />
+          <circle cx="12" cy="12" r="3.1" />
+        </symbol>
+        <symbol id="i-crown" viewBox="0 0 24 24">
+          <path d="M3 7.5 7.4 11 12 4.5 16.6 11 21 7.5 19.4 18H4.6L3 7.5Z" />
+          <path d="M4.6 20.6h14.8" />
+        </symbol>
+        <symbol id="i-skull" viewBox="0 0 24 24">
+          <path d="M12 2.6c4.7 0 8 3.3 8 7.7 0 2.7-1.1 4.3-2.3 5.3-.6.5-.9 1.2-.9 2v1.2c0 1-.8 1.7-1.7 1.7H8.9c-.9 0-1.7-.8-1.7-1.7v-1.2c0-.8-.3-1.5-.9-2C5.1 14.6 4 13 4 10.3c0-4.4 3.3-7.7 8-7.7Z" />
+          <circle cx="9.2" cy="10.6" r="1.7" /><circle cx="14.8" cy="10.6" r="1.7" />
+        </symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" /><path d="M12 6.8V12.4l3.6 2.1" />
+        </symbol>
+        <symbol id="i-wifi-off" viewBox="0 0 24 24">
+          <path d="M3 3 21 21" /><path d="M5 12.6a11 11 0 0 1 3.6-2.3" />
+          <path d="M8.4 16a6.2 6.2 0 0 1 2.2-1.3" /><path d="M15.6 10.4A11 11 0 0 1 19 12.6" />
+          <circle cx="12" cy="19.4" r="1.1" />
+        </symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24">
+          <rect x="9" y="9" width="11" height="11" rx="2.4" /><path d="M15 5.5H6A1.5 1.5 0 0 0 4.5 7v9" />
+        </symbol>
+        <symbol id="i-book" viewBox="0 0 24 24">
+          <path d="M4 5.2A2 2 0 0 1 6 3.2h13v15.6H6a2 2 0 0 0-2 2Z" /><path d="M4 18.8a2 2 0 0 1 2-2h13" />
+        </symbol>
+        <symbol id="i-users" viewBox="0 0 24 24">
+          <circle cx="9" cy="8" r="3.4" /><path d="M2.8 20a6.2 6.2 0 0 1 12.4 0" />
+          <path d="M16.4 5.2a3.4 3.4 0 0 1 0 6.6M17.6 14.6A6.2 6.2 0 0 1 21.2 20" />
+        </symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24">
+          <path d="M20 11.5A8 8 0 1 0 18.4 17" /><path d="M20.4 5.6v6h-6" />
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5.5 16 12l-7 6.5" /></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24">
+          <rect x="4.4" y="10.4" width="15.2" height="10.4" rx="2.4" />
+          <path d="M8 10.4V7.6a4 4 0 0 1 8 0v2.8" />
+        </symbol>
+        <!-- team glyphs: shape carries the meaning, hue only reinforces it -->
+        <symbol id="tm-circle" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4" /></symbol>
+        <symbol id="tm-triangle" viewBox="0 0 16 16"><path d="M8 2.4 14 13H2Z" /></symbol>
+        <symbol id="tm-square" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1.4" /></symbol>
+        <symbol id="tm-diamond" viewBox="0 0 16 16"><path d="M8 1.8 14.2 8 8 14.2 1.8 8Z" /></symbol>
+        <symbol id="tm-question" viewBox="0 0 16 16">
+          <path d="M5.6 5.8a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .9-1 1.6v.4" /><circle cx="8" cy="12.6" r="1" />
+        </symbol>
+        <!-- game emblems: one family, same 64 grid, same stroke weight -->
+        <symbol id="g-oddoneout" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
+          <circle cx="32" cy="32" r="5" fill="currentColor" stroke="none" />
+          <path d="M42 22a14 14 0 0 1 0 20M22 42a14 14 0 0 1 0-20" />
+          <path d="M50 14a25 25 0 0 1 0 36M14 50a25 25 0 0 1 0-36" />
+        </symbol>
+        <symbol id="g-council" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M32 10v40M18 52h28" /><path d="M12 20h40" />
+          <path d="M12 20 6 34a7 7 0 0 0 12 0Z" /><path d="M52 20l-6 14a7 7 0 0 0 12 0Z" />
+          <circle cx="32" cy="10" r="3.4" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="g-sabotage" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M50 18A24 24 0 1 0 52 42" /><path d="M35 8 21 32h10l-4 12" /><path d="M27 44 43 24H33" />
+        </symbol>
+        <symbol id="g-nightfall" viewBox="0 0 64 64">
+          <path d="M32 4 56 18v28L32 60 8 46V18Z" fill="none" stroke="currentColor" stroke-width="3" />
+          <path d="M38.5 20a14 14 0 1 0 0 24 17 17 0 0 1 0-24Z" fill="currentColor" />
+        </symbol>
+        <symbol id="g-oneword" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 14h44v28H34L22 54V42H10Z" /><path d="M22 24h20M22 32h12" />
+        </symbol>
+        <symbol id="g-oddprompt" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="8" y="12" width="30" height="30" rx="4" /><rect x="26" y="22" width="30" height="30" rx="4" />
+          <path d="M34 32h6" />
+        </symbol>
+        <symbol id="g-spectrum" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 44a26 26 0 0 1 52 0" /><path d="M32 44 44 24" />
+          <circle cx="32" cy="44" r="3.6" fill="currentColor" stroke="none" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <!-- Live regions must exist at first paint and start empty; injecting them
+         late means the first announcement is silently dropped. -->
+    <div id="live-polite" role="status" aria-live="polite" aria-atomic="true" class="sr"></div>
+    <div id="live-alert" role="alert" aria-live="assertive" aria-atomic="true" class="sr"></div>
+
+    <div id="app"></div>
+
+    <dialog class="sheet" id="sheet">
+      <div class="sheet__grab" aria-hidden="true"></div>
+      <header class="sheet__hd">
+        <h2 class="t-lg" id="sheet-title">How to play</h2>
+        <button class="iconbtn" id="sheet-close" aria-label="Close">
+          <svg class="ico ico--lg"><use href="#i-x" /></svg>
+        </button>
+      </header>
+      <div class="sheet__bd" id="sheet-body"></div>
+    </dialog>
+
+    <script type="module" src="/app.js"></script>
+  </body>
 </html>

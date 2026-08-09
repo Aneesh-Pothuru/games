@@ -172,6 +172,16 @@ const humanError = (why) => ERRORS[why] ?? 'That move is not allowed right now';
 
 function render() {
   const scroll = root.querySelector('.flow')?.scrollTop ?? 0;
+
+  // Every render rebuilds the whole tree, and renders happen on someone else's
+  // schedule — a broadcast, a reconnect, a timer tick. If that lands while you
+  // are typing, the field you are in is replaced by a new node and you lose
+  // focus and caret mid-word. Carry both across.
+  const was = document.activeElement;
+  const focus = was && was.id && root.contains(was)
+    ? { id: was.id, start: caretOf(was, 'selectionStart'), end: caretOf(was, 'selectionEnd') }
+    : null;
+
   clear(root);
   const screen =
     state.screen === 'home' ? homeScreen()
@@ -179,9 +189,35 @@ function render() {
     : state.screen === 'gone' ? goneScreen()
     : gameScreen();
   root.append(screen);
+
   const flow = root.querySelector('.flow');
   if (flow) flow.scrollTop = scroll;
   document.documentElement.dataset.game = state.room?.gameId ?? '';
+
+  if (focus) {
+    const next = document.getElementById(focus.id);
+    // preventScroll, or restoring focus yanks the scroll position we just put
+    // back. Only refocus if the field still exists on the new screen.
+    if (next && next !== document.activeElement) {
+      next.focus({ preventScroll: true });
+      if (focus.start !== null) {
+        try {
+          next.setSelectionRange(focus.start, focus.end);
+        } catch {
+          /* selection is not supported on every input type */
+        }
+      }
+    }
+  }
+}
+
+/** selectionStart throws on email/number inputs, so it is never read directly. */
+function caretOf(node, prop) {
+  try {
+    return node[prop] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function shell({ top, body, bottom, variant = '' }) {
@@ -205,9 +241,17 @@ function homeScreen() {
     enterkeyhint: 'go', autocomplete: 'off', autocapitalize: 'characters',
     autocorrect: 'off', spellcheck: 'false', placeholder: 'ROOM CODE',
     'aria-label': 'Room code', value: state.codeEntry,
+    // Read the field, never write to it.
+    //
+    // This used to assign `e.target.value` on every keystroke to force upper
+    // case. Phone keyboards do not type character by character — they COMPOSE,
+    // firing an input event per predicted prefix, and writing to .value ends
+    // the composition and re-inserts what is already there. Typing "poker" on
+    // a real phone produced "PPOPOKPOKEPOKERP". The uppercasing was never
+    // needed anyway: `.input--code` already renders uppercase in CSS, and
+    // doJoin() normalises before it goes anywhere.
     oninput: (e) => {
       state.codeEntry = e.target.value.toUpperCase().slice(0, 16);
-      e.target.value = state.codeEntry;
       renderRescue();
     },
     onkeydown: (e) => { if (e.key === 'Enter') doJoin(state.codeEntry, state.name); },
@@ -609,40 +653,87 @@ function gameTop(ctx, ui) {
 }
 
 /** The client interpolates against a server timestamp; it never owns the clock. */
+/**
+ * The server sends a deadline but never says how long the phase was, so the
+ * ring calibrates itself: the largest remaining time we have seen for this
+ * particular deadline is the full span. Keyed by deadline so a new phase
+ * recalibrates on its own.
+ */
+const spans = new Map();
+function spanFor(deadline, left) {
+  const total = Math.max(spans.get(deadline) ?? 0, left);
+  spans.set(deadline, total);
+  if (spans.size > 8) spans.delete(spans.keys().next().value);
+  return total;
+}
+
 function timerNode(view) {
-  const total = view.totalMs ?? 0;
-  const left = view.deadline ? view.deadline - Date.now() : (view.remainingMs ?? 0);
-  const p = total ? Math.max(0, Math.min(1, left / total)) : 0;
-  const urgent = left <= 10_000 && left > 0;
-  const node = el('div', {
-    class: `timer ${urgent ? 'is-urgent' : ''}`, role: 'timer',
-    'aria-label': `${Math.ceil(left / 1000)} seconds left`, style: `--p:${p}`,
-  }, [
+  const node = el('div', { class: 'timer', role: 'timer' }, [
     el('span', {
       class: 'timer__n num', html:
         `<svg class="timer__ring" viewBox="0 0 100 100" aria-hidden="true"><circle class="timer__trk" cx="50" cy="50" r="44"/><circle class="timer__bar" cx="50" cy="50" r="44"/></svg>`,
     }),
-    el('span', { class: 'timer__n num', text: formatClock(left) }),
+    el('span', { class: 'timer__n num timer__t' }),
   ]);
-  if (view.deadline) scheduleTick();
+  paintTimer(node, view);
+  if (view.deadline) startTicking(view);
   return node;
 }
 
+/** Write the two things that change. No node is created or destroyed. */
+function paintTimer(node, view) {
+  const left = view.deadline ? view.deadline - Date.now() : (view.remainingMs ?? 0);
+  const total = view.deadline ? spanFor(view.deadline, left) : (view.totalMs ?? 0);
+  const p = total > 0 ? Math.max(0, Math.min(1, left / total)) : 0;
+  node.style.setProperty('--p', String(p));
+  node.classList.toggle('is-urgent', left <= 10_000 && left > 0);
+  node.setAttribute('aria-label', `${Math.max(0, Math.ceil(left / 1000))} seconds left`);
+  node.querySelector('.timer__t').textContent = formatClock(left);
+}
+
+/**
+ * The countdown used to call render() once a second.
+ *
+ * That tore the entire DOM down and rebuilt it every tick — taking with it
+ * whatever field you were typing in, whatever slider you were dragging, and
+ * the focus and caret along with them. During Spectrum's 90-second clue phase
+ * the psychic's input was destroyed and recreated empty every single second.
+ *
+ * A clock only needs to repaint a clock.
+ */
 let tickHandle = 0;
-function scheduleTick() {
+let ticking = null;
+function startTicking(view) {
+  ticking = view;
   if (tickHandle) return;
-  tickHandle = setTimeout(() => {
-    tickHandle = 0;
-    if (state.screen === 'game') render();
+  tickHandle = setInterval(() => {
+    const node = document.querySelector('.timer');
+    if (!node || state.screen !== 'game' || !ticking?.deadline) {
+      clearInterval(tickHandle);
+      tickHandle = 0;
+      return;
+    }
+    paintTimer(node, ticking);
   }, 1000);
+}
+
+/** One-shot re-render, for state that becomes true merely by time passing. */
+let graceHandle = 0;
+function scheduleGraceCheck(ms) {
+  if (graceHandle) return;
+  graceHandle = setTimeout(() => {
+    graceHandle = 0;
+    render();
+  }, ms);
 }
 
 function connectionBanner() {
   if (state.status === 'online') return null;
   // Suppress the banner for a sub-2s blip: flashing on every hiccup makes a
   // working connection feel broken.
-  if (state.status === 'offline' && Date.now() - state.offlineSince < 2000) {
-    scheduleTick();
+  const waited = Date.now() - state.offlineSince;
+  if (state.status === 'offline' && waited < 2000) {
+    scheduleGraceCheck(2000 - waited + 50);
     return null;
   }
   return el('div', { class: 'banner banner--danger row' }, [

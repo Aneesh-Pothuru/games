@@ -5,16 +5,13 @@
  * face-down play genuinely face down, does a half-built play survive a
  * re-render, and does the whole loop — claim, call, pick up — actually run.
  */
-import { chromium, devices } from 'playwright';
-import { existsSync } from 'node:fs';
+import { devices } from 'playwright';
+import { BASE, launchBrowser } from './launch.mjs';
 
-const BUNDLED = '/opt/pw-browsers/chromium';
-const EXECUTABLE = process.env.CHROMIUM_PATH || (existsSync(BUNDLED) ? BUNDLED : undefined);
-const BASE = process.env.BASE_URL ?? 'http://localhost:8787';
 const OUT = process.env.SHOT_DIR ?? '/tmp/parlour-shots';
 await import('node:fs').then((fs) => fs.mkdirSync(OUT, { recursive: true }));
 
-const browser = await chromium.launch({ executablePath: EXECUTABLE });
+const browser = await launchBrowser();
 let failures = 0;
 const check = (name, cond, extra = '') => {
   console.log(`${cond ? 'ok  ' : 'FAIL'} ${name}${cond ? '' : ` -- ${extra}`}`);

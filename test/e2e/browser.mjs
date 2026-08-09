@@ -1,15 +1,11 @@
 /** Drive the real UI at phone size with six players. */
-import { chromium, devices } from 'playwright';
-import { existsSync } from 'node:fs';
+import { devices } from 'playwright';
+import { BASE, launchBrowser } from './launch.mjs';
 
-// Prefer an explicit path, then this image's preinstalled browser, then let
-// Playwright resolve its own download (which is what CI does).
-const BUNDLED = '/opt/pw-browsers/chromium';
-const EXECUTABLE = process.env.CHROMIUM_PATH || (existsSync(BUNDLED) ? BUNDLED : undefined);
 
 const OUT = process.env.SHOT_DIR ?? '/tmp/parlour-shots';
 await import('node:fs').then(fs => fs.mkdirSync(OUT, { recursive: true }));
-const browser = await chromium.launch({ executablePath: EXECUTABLE });
+const browser = await launchBrowser();
 let failures = 0;
 const check = (name, cond, extra = '') => {
   console.log(`${cond ? 'ok  ' : 'FAIL'} ${name}${cond ? '' : ` -- ${extra}`}`);
@@ -59,6 +55,35 @@ await host.screenshot({ path: `${OUT}/01-home.png` });
   check('empty name produces visible feedback', Boolean(toastBox), 'no toast rendered');
   if (toastBox) {
     check('that feedback is on screen', toastBox.y >= 0 && toastBox.y < 667, `y=${Math.round(toastBox.y)}`);
+  }
+
+  // --- REGRESSION: phone keyboards COMPOSE, they do not type ---
+  // A predictive keyboard fires one input event per predicted prefix. The code
+  // box used to write back into itself on every one of those, which ends the
+  // composition and re-inserts what is already there: typing "poker" came out
+  // as "PPOPOKPOKEPOKERP". fill() cannot catch this — it sets the value in one
+  // go — so this drives the real composition events.
+  {
+    const cdp = await small.newCDPSession(sp);
+    for (const sel of ['#code', '#startbar-name']) {
+      // The start bar only exists once a game is picked, and tapping the
+      // already-selected tile would toggle it back off.
+      if (sel === '#startbar-name' && !(await sp.locator('#startbar-name').count())) {
+        await sp.locator('.gametile').first().click();
+      }
+      await sp.click(sel);
+      await sp.evaluate((s) => { document.querySelector(s).value = ''; }, sel);
+      for (const t of ['p', 'po', 'pok', 'poke', 'poker']) {
+        await cdp.send('Input.imeSetComposition', { text: t, selectionStart: t.length, selectionEnd: t.length });
+      }
+      await cdp.send('Input.insertText', { text: 'poker' });
+      await sp.waitForTimeout(250);
+      const got = await sp.evaluate((s) => document.querySelector(s).value, sel);
+      check(`${sel} survives a composing keyboard`, got.toLowerCase() === 'poker', `got "${got}"`);
+    }
+    await sp.evaluate(() => { document.querySelector('#code').value = ''; });
+    await sp.reload();
+    await sp.waitForSelector('.gametile');
   }
 
   // --- REGRESSION: typing a game name into the code box must not dead-end ---

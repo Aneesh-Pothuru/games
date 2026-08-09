@@ -239,6 +239,30 @@ offline indicator therefore never fired for anyone who simply closed their tab.
   the commit button always **names its target** ("Nominate Priya") so a
   misfire is caught by reading rather than by dismissing a dialog.
 
+## CSS traps worth knowing
+
+Two of these shipped and were caught by eye rather than by a test, which is why
+`test/e2e/visual.mjs` now asserts computed values instead of asserting that a
+stylesheet was served. CSS fails silently: an invalid value drops one
+declaration and everything still renders, just wrong.
+
+- **Container query units used ON the container resolve against the nearest
+  ANCESTOR container** — the viewport, usually — not the element itself. And
+  for anything that affects the container's own size (padding, width) the
+  declaration is dropped outright as a cyclic dependency. Measured:
+  `inset 0 0 0 5.5cqw` on a 46px card produced a 21px frame that swallowed the
+  face, and `padding: 7cqw` silently did nothing. Children are fine; the
+  container itself must use `calc(var(--pc-w) * n)`.
+- **A `@container` rule can only style DESCENDANTS of its container.**
+  `@container (min-width: 58px) { .pcard { padding } }` never applies to the
+  card it was written for, even though the same block's `.pcard__rank` rule
+  does. Size-class selectors, not container queries, for the element itself.
+- **The colour interpolation method belongs with the direction.**
+  `linear-gradient(180deg in oklab, …)`, not `linear-gradient(in oklab, 180deg, …)`.
+  The wrong order is invalid and takes the whole declaration with it.
+- **`background:` is a shorthand.** A later `background-image` wipes out the
+  colour the shorthand set, which is how card backs ended up transparent.
+
 ## Design
 
 No web fonts, no image files, no icon library, no CSS framework, no JS

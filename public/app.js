@@ -38,6 +38,8 @@ const state = {
   // inputs, and anything typed but unsaved would otherwise be silently lost.
   name: recalledName(),
   codeEntry: '',
+  // What /api/room told us about a room we have not joined yet.
+  peek: null,
 };
 
 // --------------------------------------------------------------------- boot --
@@ -61,6 +63,7 @@ async function boot() {
     const seat = loadSeat(path);
     if (seat) return join(path, seat);
     state.screen = 'join';
+    loadPeek(path);
   }
   render();
 }
@@ -152,6 +155,8 @@ const ERRORS = {
   veto_refused: 'The Speaker already refused',
   room_full: 'That room is full',
   in_progress: 'That game has already started',
+  waiting_for_next_round: 'You are in for the next round',
+  host_is_here: 'The host is still connected',
   not_found: 'No room with that code',
   name_required: 'Enter a name first',
   bad_code: 'That code does not look right',
@@ -217,7 +222,7 @@ function homeScreen() {
       // browser's find-in-page work. Kept to two lines so the games clear the
       // fold on a 375x667 phone.
       el('p', { class: 'banner banner--accent t-xs', text:
-        'Spyfall · Werewolf · Secret Hitler · Avalon · Wavelength — all five are below, under our own names.' }),
+        'Spyfall · Wavelength · Werewolf · Poker · Secret Hitler · Avalon — all six are below.' }),
 
       // Joining is one compact row, not a titled section: most joiners arrive
       // on a link and never see this screen at all.
@@ -254,6 +259,7 @@ const ALIASES = {
   'secret hitler': 'council', secrethitler: 'council', hitler: 'council',
   avalon: 'sabotage', resistance: 'sabotage',
   wavelength: 'spectrum',
+  poker: 'holdem', holdem: 'holdem', 'texas holdem': 'holdem', cards: 'holdem',
 };
 
 /** Does what they typed look like a game rather than a room code? */
@@ -322,6 +328,13 @@ function startBar() {
       disabled: state.busy,
       onclick: () => doCreate(state.name),
     }, [state.busy ? 'Starting…' : `Start ${game.name}`]),
+    // The rules were previously reachable only from inside a running game, so
+    // the host had to commit five friends to a room before they could read
+    // what they had picked.
+    el('button', {
+      class: 'btn btn--ghost btn--block',
+      onclick: () => openRules(game.id),
+    }, [`How to play ${game.name}`]),
   ]);
 }
 
@@ -346,20 +359,60 @@ function joinScreen() {
     oninput: (e) => { state.name = e.target.value; },
     onkeydown: (e) => { if (e.key === 'Enter') doJoin(state.code, state.name); },
   });
+  // A code out of context tells you nothing. The peek is one cheap read that
+  // turns "Joining room VDMH" into "Ana's game of Texas Hold'em, 4 already in"
+  // — which is also how you find out you have the wrong room before you type
+  // your name into it.
+  const peek = state.peek;
+  const inProgress = peek?.inProgress;
+  // Finding out a room is full AFTER typing your name and tapping Join is a
+  // waste of the only two things a guest has to give.
+  const full = peek && peek.playerCount + (peek.waitingCount ?? 0) >= peek.maxPlayers;
   return shell({
     top: el('header', { class: 'bar bar--top' }, [el('span', { class: 'label', text: 'Parlour' }), themeToggle()]),
     body: [
-      el('h1', { class: 't-xl', text: `Joining room ${state.code}` }),
-      el('div', { class: 'field' }, [el('label', { class: 'label', for: 'name', text: 'Your name' }), nameInput]),
-    ],
-    bottom: el('footer', { class: 'bar bar--bottom' }, [
-      el('button', {
-        class: 'btn btn--primary btn--block',
-        disabled: state.busy,
-        onclick: () => doJoin(state.code, state.name),
-      }, ['Go — join game']),
-    ]),
+      el('h1', { class: 't-xl', text: peek ? peek.gameName : `Joining room ${state.code}` }),
+      peek && el('p', { class: 'dim', text:
+        `${peek.hostName ? `${peek.hostName}’s room` : `Room ${state.code}`} · ${peek.playerCount} ${peek.playerCount === 1 ? 'player' : 'players'} in` }),
+      full && el('div', { class: 'banner banner--danger', text:
+        `This room is full — ${peek.gameName} seats ${peek.maxPlayers}.` }),
+      !full && inProgress && el('div', { class: 'banner banner--accent', text:
+        'A round is already running. Join now and you are dealt in as soon as it finishes.' }),
+      !full && el('div', { class: 'field' }, [el('label', { class: 'label', for: 'name', text: 'Your name' }), nameInput]),
+    ].filter(Boolean),
+    bottom: el('footer', { class: 'bar bar--bottom' }, full
+      ? [el('button', {
+          class: 'btn btn--primary btn--block',
+          onclick: () => {
+            history.pushState({}, '', '/');
+            state.screen = 'home';
+            state.code = null;
+            state.peek = null;
+            render();
+          },
+        }, ['Start a room of your own'])]
+      : [el('button', {
+          class: 'btn btn--primary btn--block',
+          disabled: state.busy,
+          onclick: () => doJoin(state.code, state.name),
+        }, [inProgress ? 'Hold me a seat' : 'Go — join game'])]),
   });
+}
+
+/** Fire-and-forget: the join screen renders fine without it. */
+async function loadPeek(code) {
+  state.peek = null;
+  try {
+    const res = await fetch(`/api/room?code=${encodeURIComponent(code)}`);
+    if (!res.ok) return;
+    const info = await res.json();
+    if (state.screen === 'join' && state.code === code) {
+      state.peek = info;
+      render();
+    }
+  } catch {
+    /* the screen already works without it */
+  }
 }
 
 function goneScreen() {
@@ -419,6 +472,7 @@ async function doJoin(code, name) {
     state.name = '';
     state.screen = 'join';
     state.code = clean;
+    loadPeek(clean);
     render();
     toast('Add your name to join.');
     return;
@@ -434,6 +488,14 @@ async function doJoin(code, name) {
     await join(clean, res);
   } catch (err) {
     toast(humanError(err.code));
+    // The room filled up while they were typing. Re-peek so the screen shows
+    // the wall and the way around it, rather than a toast that fades back to a
+    // form that will keep failing.
+    if (err.code === 'room_full') {
+      state.screen = 'join';
+      state.code = clean;
+      loadPeek(clean);
+    }
   } finally {
     state.busy = false;
     render();
@@ -463,14 +525,63 @@ function gameScreen() {
     rerender: render,
   };
 
-  const body = inLobby ? lobbyBody(ctx) : ui.body(ctx);
-  const bottom = inLobby ? lobbyBottom(ctx) : ui.bottom(ctx);
+  // Arrived mid-round: holding a seat for the next one, and deliberately sent
+  // no game view at all, so there is nothing here that could leak.
+  const waiting = !inLobby && !room.players.some((p) => p.id === state.pid);
+  const body = waiting ? waitingBody(ctx) : inLobby ? lobbyBody(ctx) : ui.body(ctx);
+  const bottom = waiting ? waitingBottom(ctx) : inLobby ? lobbyBottom(ctx) : ui.bottom(ctx);
 
   return shell({
-    top: gameTop(ctx, ui),
+    top: gameTop(ctx, waiting ? {} : ui),
     body: [connectionBanner(), ...body],
     bottom,
   });
+}
+
+function waitingBody(ctx) {
+  const { room } = ctx;
+  const game = state.games.find((g) => g.id === room.gameId);
+  const queue = room.waiting ?? [];
+  const mine = queue.findIndex((p) => p.id === state.pid);
+  return [
+    el('div', { class: 'banner banner--accent', text: `A round of ${game?.name ?? 'the game'} is already going.` }),
+    el('div', { class: 'card center stack stack--tight' }, [
+      el('div', { class: 'label', text: 'You are in' }),
+      el('b', { class: 'secret__value', text: mine === 0 ? 'Next round' : `Next round · ${mine + 1} in the queue` }),
+      el('p', { class: 'dim t-sm', text: 'Your seat is held. You will be dealt in automatically when this round finishes — nothing to do but wait.' }),
+    ]),
+    el('div', { class: 'label', text: 'Playing right now' }),
+    playerList(ctx, { showHost: true }),
+    queue.length > 1 && el('div', { class: 'label', text: 'Also waiting' }),
+    queue.length > 1 && el('ul', { class: 'plist' }, queue.filter((p) => p.id !== state.pid).map((p) =>
+      playerTile(ctx, { ...p, online: p.online }, {}))),
+  ].filter(Boolean);
+}
+
+function waitingBottom(ctx) {
+  return el('footer', { class: 'bar bar--bottom' }, [
+    el('button', {
+      class: 'btn btn--primary btn--block',
+      onclick: () => openRules(ctx.room.gameId),
+    }, ['Read the rules while you wait']),
+    el('button', {
+      class: 'btn btn--ghost btn--block',
+      onclick: () => leaveRoom(),
+    }, ['Leave']),
+  ]);
+}
+
+/** Give up the seat, drop the token, and go home — no orphaned reconnects. */
+function leaveRoom() {
+  state.conn?.send({ t: 'leave' });
+  if (state.room?.code) clearSeat(state.room.code);
+  state.conn?.close?.();
+  state.room = null;
+  state.view = null;
+  state.code = null;
+  state.screen = 'home';
+  history.pushState({}, '', '/');
+  render();
 }
 
 function gameTop(ctx, ui) {
@@ -540,6 +651,9 @@ function lobbyBody(ctx) {
   const { room, isHost } = ctx;
   const game = state.games.find((g) => g.id === room.gameId);
   const enough = room.players.length >= (game?.minPlayers ?? 3);
+  const full = room.players.length >= (game?.maxPlayers ?? 99);
+  const host = room.players.find((p) => p.id === room.hostId);
+  const hostGone = host && !host.online;
 
   return [
     el('button', {
@@ -550,12 +664,47 @@ function lobbyBody(ctx) {
       el('span', { class: 'roomcode__cells num', 'aria-hidden': 'true' }, room.code.split('').map((c) => el('i', { text: c }))),
       el('span', { class: 'roomcode__hint label' }, [icon('i-copy', 'ico ico--sm'), 'Tap to copy the link']),
     ]),
-    el('div', { class: 'label', text: `${room.players.length} in the room` }),
-    playerList(ctx, { showHost: true }),
+    // The one room-wide dead end: the host closes their tab and nobody else
+    // can start. Offer the way out where the problem is visible.
+    hostGone && !isHost && el('div', { class: 'stack stack--tight' }, [
+      el('div', { class: 'banner banner--danger', text: `${host.name} has dropped out, so nobody can start.` }),
+      el('button', {
+        class: 'btn btn--secondary btn--block',
+        onclick: () => state.conn?.send({ t: 'claimHost' }),
+      }, ['Take over as host']),
+    ]),
+    el('div', { class: 'label', text: `${room.players.length} in the room${full ? ' — full' : ''}` }),
+    playerList(ctx, {
+      showHost: true,
+      // Host controls live on the tiles rather than behind a settings screen:
+      // "get Dev out of this room" is a thing you want to do while looking at
+      // Dev, not three taps away.
+      onPickFor: (p) => (isHost && p.id !== ctx.me ? () => openPlayerSheet(ctx, p) : undefined),
+      subFor: (p) => (p.id === room.hostId ? 'Host' : p.online ? null : 'Reconnecting'),
+    }),
     !enough && el('div', { class: 'banner', text: `Needs at least ${game?.minPlayers} players.` }),
-    !isHost && el('div', { class: 'banner banner--accent', text: `Waiting for ${nameOf(ctx, room.hostId)} to start.` }),
+    !isHost && !hostGone && el('div', { class: 'banner banner--accent', text: `Waiting for ${nameOf(ctx, room.hostId)} to start.` }),
     isHost && gameOptions(ctx, game),
   ];
+}
+
+/** Host-only actions on one player. A sheet, so a mis-tap is never destructive. */
+function openPlayerSheet(ctx, player) {
+  document.getElementById('sheet-title').textContent = player.name;
+  const body = clear(document.getElementById('sheet-body'));
+  const close = () => sheet.close();
+  body.append(
+    el('button', {
+      class: 'btn btn--secondary btn--block',
+      onclick: () => { state.conn?.send({ t: 'makeHost', playerId: player.id }); close(); },
+    }, [`Make ${player.name} the host`]),
+    el('button', {
+      class: 'btn btn--danger btn--block',
+      onclick: () => { state.conn?.send({ t: 'kick', playerId: player.id }); close(); },
+    }, [`Remove ${player.name} from the room`]),
+    el('button', { class: 'btn btn--ghost btn--block', onclick: close }, ['Cancel']),
+  );
+  sheet.showModal();
 }
 
 function gameOptions(ctx, game) {
@@ -635,8 +784,7 @@ function playerTile(ctx, player, opts = {}) {
     badges.push(el('span', { class: 'bdg bdg--off', title: 'Reconnecting' }, [icon('i-wifi-off')]));
   }
 
-  const tag = opts.onPick ? 'button' : 'li';
-  return el(tag, {
+  const tile = el(opts.onPick ? 'button' : 'li', {
     class: `ptile ${opts.pick ? 'ptile--pick' : ''} ${opts.selected ? 'is-selected' : ''} ${player.online ? '' : 'is-offline'}`,
     dataset: opts.state ? { state: opts.state } : {},
     disabled: opts.disabled,
@@ -649,6 +797,10 @@ function playerTile(ctx, player, opts = {}) {
     ]),
     el('span', { class: 'ptile__badges' }, badges),
   ]);
+  // A <ul> whose children are <button>s is not a list to a screen reader, and
+  // "6 items" is real information here. display:contents keeps the flex layout
+  // identical while restoring the semantics.
+  return opts.onPick ? el('li', { class: 'ptile__slot' }, [tile]) : tile;
 }
 
 function playerList(ctx, opts = {}) {
@@ -658,6 +810,9 @@ function playerList(ctx, opts = {}) {
       sub: opts.subFor?.(p),
       state: opts.stateFor?.(p),
       badges: opts.badgesFor?.(p),
+      // Per-player, because "you cannot manage yourself" must make the tile
+      // inert rather than a button that does nothing when tapped.
+      onPick: opts.onPickFor?.(p),
     })),
   );
 }

@@ -455,6 +455,9 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 
 /* ---------------------------------------------------------- player tiles -- */
 .plist { display: flex; flex-direction: column; gap: var(--sp-2); }
+/* A tappable tile is a <button> inside its <li>, so the list keeps its
+   semantics; display:contents makes the button the flex item as before. */
+.ptile__slot { display: contents; }
 .ptile {
   position: relative; display: flex; align-items: center; gap: var(--sp-3);
   min-height: 64px; padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);

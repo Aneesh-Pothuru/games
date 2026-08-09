@@ -150,8 +150,15 @@ const unknownSeat = await new Promise((resolve) => {
 });
 check('an unknown seat is refused', unknownSeat === 'refused', `got ${unknownSeat}`);
 
-// --- room locks once started ---
-check('cannot join a game in progress', (await post('/api/join', { code, name: 'Late' })).status === 409);
+// --- a room in progress no longer turns people away ---
+// This used to be a 409, which meant someone arriving ten minutes late could
+// not get in for the rest of the night: a room never returns to the lobby
+// phase, so the refusal was permanent.
+{
+  const peekMid = await (await fetch(`${BASE}/api/room?code=${code}`)).json();
+  check('peek reports a round in progress', peekMid.inProgress === true, JSON.stringify(peekMid));
+  check('peek reports the game maximum', peekMid.maxPlayers > 0, JSON.stringify(peekMid));
+}
 
 // --- poker: the deck and everyone else's cards must never reach the wire ---
 {
@@ -225,6 +232,101 @@ check('cannot join a game in progress', (await post('/api/join', { code, name: '
     JSON.stringify(pboxes[rightIndex]).slice(0, 160));
 
   for (const ws of psockets) { try { ws.close(); } catch {} }
+}
+
+// --- arriving mid-round holds a seat instead of dead-ending ---
+{
+  const late = await post('/api/join', { code, name: 'Late' });
+  check('a late arrival is accepted', late.status === 200, JSON.stringify(late.body));
+  check('and is told they are waiting', late.body.waiting === true);
+
+  const box = [];
+  const ws = await new Promise((resolve) => {
+    const s = new WebSocket(`ws://localhost:8787/ws?code=${code}&pid=${late.body.pid}&tok=${late.body.tok}`);
+    s.addEventListener('message', (e) => { try { box.push(JSON.parse(e.data)); } catch {} });
+    s.addEventListener('open', () => resolve(s));
+    s.addEventListener('error', () => resolve(s));
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  const mine = [...box].reverse().find((m) => m.t === 'state');
+  check('a waiting player can watch the room', Boolean(mine));
+  // The whole point of keeping them out of `players`: no game module was
+  // written to redact for a viewer who is not at the table, so they get
+  // nothing at all rather than something we hope is safe.
+  check('a waiting player is sent no game view', mine.view === null, JSON.stringify(mine.view)?.slice(0, 80));
+  check('a waiting player is not in the player list', !mine.room.players.some((p) => p.id === late.body.pid));
+  check('a waiting player is listed as waiting', mine.room.waiting.some((p) => p.name === 'Late'));
+
+  box.length = 0;
+  ws.send(JSON.stringify({ t: 'action', action: { type: 'ack' } }));
+  await new Promise((r) => setTimeout(r, 300));
+  check('a waiting player cannot act in the running game',
+    box.some((m) => m.t === 'reject' && m.why === 'waiting_for_next_round'));
+
+  // The seat becomes real on the next deal.
+  sockets[0].send(JSON.stringify({ t: 'playAgain' }));
+  await new Promise((r) => setTimeout(r, 600));
+  const after = [...box].reverse().find((m) => m.t === 'state');
+  check('the next round deals the waiting player in', after?.room.players.some((p) => p.id === late.body.pid),
+    JSON.stringify(after?.room.players.map((p) => p.name)));
+  check('and the waiting list is emptied', after?.room.waiting.length === 0);
+  check('and they now get a game view', after?.view !== null);
+  try { ws.close(); } catch {}
+}
+
+// --- a host who closes their tab does not strand the room ---
+{
+  const hc = await post('/api/create', { game: 'spectrum', name: 'Host' });
+  const hcode = hc.body.code;
+  const guest = (await post('/api/join', { code: hcode, name: 'Guest' })).body;
+
+  const gbox = [];
+  const open2 = (s, box) => new Promise((resolve) => {
+    const ws = new WebSocket(`ws://localhost:8787/ws?code=${hcode}&pid=${s.pid}&tok=${s.tok}`);
+    ws.addEventListener('message', (e) => { try { box.push(JSON.parse(e.data)); } catch {} });
+    ws.addEventListener('open', () => resolve(ws));
+    ws.addEventListener('error', () => resolve(ws));
+  });
+  const hostWs = await open2(hc.body, []);
+  const guestWs = await open2(guest, gbox);
+  await new Promise((r) => setTimeout(r, 400));
+
+  gbox.length = 0;
+  guestWs.send(JSON.stringify({ t: 'claimHost' }));
+  await new Promise((r) => setTimeout(r, 300));
+  check('the host cannot be deposed while they are connected',
+    gbox.some((m) => m.t === 'reject' && m.why === 'host_is_here'));
+
+  hostWs.close();
+  await new Promise((r) => setTimeout(r, 500));
+  gbox.length = 0;
+  guestWs.send(JSON.stringify({ t: 'claimHost' }));
+  await new Promise((r) => setTimeout(r, 400));
+  const claimed = [...gbox].reverse().find((m) => m.t === 'state');
+  check('but a departed host can be replaced', claimed?.room.hostId === guest.pid,
+    JSON.stringify(gbox).slice(0, 160));
+
+  gbox.length = 0;
+  guestWs.send(JSON.stringify({ t: 'start' }));
+  await new Promise((r) => setTimeout(r, 500));
+  check('and the new host can actually start the game',
+    [...gbox].reverse().find((m) => m.t === 'state')?.room.phase === 'playing');
+  try { guestWs.close(); } catch {}
+}
+
+// --- a room cannot be filled past the game's own maximum ---
+{
+  const cap = await post('/api/create', { game: 'council', name: 'H' });
+  const ccode = cap.body.code;
+  let refusedAt = null;
+  for (let i = 0; i < 12 && refusedAt === null; i++) {
+    const res = await post('/api/join', { code: ccode, name: `P${i}` });
+    if (res.status !== 200) refusedAt = { at: i + 2, status: res.status, why: res.body.error };
+  }
+  // The Council seats ten. The eleventh must be turned away at the door, not
+  // at the Start button after everyone has settled in.
+  check('joining stops at the game maximum', refusedAt?.at === 11, JSON.stringify(refusedAt));
+  check('and says the room is full', refusedAt?.why === 'room_full', JSON.stringify(refusedAt));
 }
 
 // --- oversized frames are rejected ---

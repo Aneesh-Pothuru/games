@@ -698,6 +698,12 @@ button.chip { min-height: var(--tap); padding-inline: var(--sp-4); }
 /* These are spans inside a span, so they need to be told to stack. */
 .gametile__name { display: block; font-size: var(--t-lg); font-weight: 700; line-height: 1.15; }
 .gametile__meta { display: block; font-size: var(--t-xs); color: var(--text-3); margin-top: 2px; }
+/* The recognisable name. Deliberately high-contrast and directly under the
+   title -- it is what most people scan for. */
+.gametile__familiar {
+  display: inline-block; margin-top: 3px;
+  font-size: var(--t-xs); font-weight: 700; color: var(--game-accent);
+}
 
 .secret {
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);

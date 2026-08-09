@@ -34,6 +34,7 @@ export const meta = {
     'Two factions sit on one council. The Stewards outnumber the Cabal but cannot tell who is who. The Cabal know each other — and they know which of them must never be elected Deputy.',
   minPlayers: 5,
   maxPlayers: 10,
+  familiar: 'Secret Hitler',
   emblem: 'g-council',
   lengthMinutes: '25–45 min',
 };

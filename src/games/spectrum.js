@@ -23,6 +23,7 @@ export const meta = {
     'The psychic sees a hidden target between two opposed ideas and gives a single clue. Their team argues and moves the dial. Everyone finds out how differently other people’s brains are wired.',
   minPlayers: 2,
   maxPlayers: 16,
+  familiar: 'Wavelength',
   emblem: 'g-spectrum',
   lengthMinutes: '15–20 min',
 };

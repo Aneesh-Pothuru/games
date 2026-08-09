@@ -214,6 +214,9 @@ function homeScreen() {
       icon(g.emblem, 'gametile__emblem'),
       el('span', { class: 'grow' }, [
         el('span', { class: 'gametile__name', text: g.name }),
+        // The name people came looking for. Without this, someone hunting for
+        // "Spyfall" scrolls past the game that IS Spyfall.
+        g.familiar && el('span', { class: 'gametile__familiar', text: `Plays like ${g.familiar}` }),
         el('span', { class: 'gametile__meta', text: `${g.minPlayers}–${g.maxPlayers} players · ${g.lengthMinutes}` }),
         el('span', { class: 'dim t-sm', style: 'display:block;margin-top:4px', text: g.tagline }),
       ]),
@@ -474,21 +477,39 @@ function lobbyBottom(ctx) {
   const enough = count >= (game?.minPlayers ?? 3);
   const tooMany = count > (game?.maxPlayers ?? 99);
 
+  const need = (game?.minPlayers ?? 3) - count;
+
   if (!isHost) {
     return el('footer', { class: 'bar bar--bottom' }, [
-      el('button', { class: 'btn btn--secondary btn--block', onclick: shareLink }, ['Invite someone']),
+      el('button', { class: 'btn btn--primary btn--block', onclick: shareLink }, [
+        need > 0 ? `Invite ${need} more ${need === 1 ? 'person' : 'people'}` : 'Invite someone',
+      ]),
     ]);
   }
+
+  // Short of players? Inviting IS the next step, so it takes the primary slot.
+  // A disabled button with nothing beside it is the dead end that made this
+  // look broken.
+  if (!enough) {
+    return el('footer', { class: 'bar bar--bottom' }, [
+      el('button', { class: 'btn btn--primary btn--block', onclick: shareLink }, [
+        `Invite ${need} more ${need === 1 ? 'person' : 'people'}`,
+      ]),
+      el('button', {
+        class: 'btn btn--secondary btn--block',
+        onclick: () => state.conn?.send({ t: 'start' }),
+        disabled: true,
+      }, [`Start needs ${game.minPlayers} players`]),
+    ]);
+  }
+
   return el('footer', { class: 'bar bar--bottom' }, [
     el('button', {
       class: 'btn btn--primary btn--block',
-      disabled: !enough || tooMany,
-      // The reason lives in the label, so a disabled button never dead-ends.
+      disabled: tooMany,
       onclick: () => state.conn?.send({ t: 'start' }),
     }, [
-      tooMany ? `Too many players (max ${game.maxPlayers})`
-      : enough ? `Start with ${count} player${count === 1 ? '' : 's'}`
-      : `Need ${game.minPlayers} players (${count} here)`,
+      tooMany ? `Too many players (max ${game.maxPlayers})` : `Start with ${count} player${count === 1 ? '' : 's'}`,
     ]),
     el('button', { class: 'btn btn--ghost btn--block', onclick: shareLink }, ['Invite someone']),
   ]);

@@ -28,6 +28,7 @@ export const meta = {
     'You all get the same location and a role in it. One player gets nothing at all and has to work out where they are before the rest of you work out who they are.',
   minPlayers: 3,
   maxPlayers: 12,
+  familiar: 'Spyfall',
   emblem: 'g-oddoneout',
   lengthMinutes: '8–10 min per round',
 };

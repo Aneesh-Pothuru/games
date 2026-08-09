@@ -20,8 +20,9 @@ import * as oddoneout from './oddoneout.js';
 import * as council from './council.js';
 import * as sabotage from './sabotage.js';
 import * as spectrum from './spectrum.js';
+import * as nightfall from './nightfall.js';
 
-const MODULES = [oddoneout, council, sabotage, spectrum];
+const MODULES = [oddoneout, nightfall, council, sabotage, spectrum];
 
 export const GAMES = Object.fromEntries(MODULES.map((m) => [m.meta.id, m]));
 

@@ -27,10 +27,28 @@ export const meta = {
   lengthMinutes: '15–20 min',
 };
 
-/** Half-widths on a 0–100 scale, reproducing the physical wedge feel. */
-const BANDS = { bullseye: 2.5, inner: 7.5, outer: 12.5 };
-const TARGET_MIN = 12.5;
-const TARGET_MAX = 87.5;
+/**
+ * Target geometry.
+ *
+ * The five wedges are EQUAL width — a common misreading is that the bands get
+ * progressively wider, but the 2- and 3-point scores only cover more total arc
+ * because each appears twice, once per side. The rulebook never states the
+ * angle in words; measurement of the official artwork puts each wedge at
+ * ~7.45°, which we round to a clean 7.5° (1/24 of the 180° spectrum), i.e.
+ * 4.1667 units on a 0–100 scale.
+ *
+ * These are cumulative distances from the target centre, so the 4-band is
+ * half a wedge wide and each subsequent band adds a full wedge.
+ */
+const WEDGE = 100 / 24; // 4.1667 units == 7.5 degrees
+const BANDS = {
+  bullseye: WEDGE / 2, // 2.0833
+  inner: WEDGE * 1.5, //  6.25
+  outer: WEDGE * 2.5, // 10.4167
+};
+// Keep the whole target on the board so every band is always reachable.
+const TARGET_MIN = BANDS.outer;
+const TARGET_MAX = 100 - BANDS.outer;
 const WIN_SCORE = 10;
 
 export const defaultConfig = { mode: 'auto', clueSeconds: 90, guessSeconds: 120 };
@@ -49,11 +67,19 @@ function resolveMode(room) {
   return room.players.length >= 6 ? 'teams' : 'coop';
 }
 
+/**
+ * Official rule: a dial landing exactly on a boundary scores the HIGHER of the
+ * two values. The band edges are thirds and twenty-fourths, so an exact hit is
+ * never exactly representable in binary floating point — without the epsilon,
+ * a dial genuinely on the line loses a point about half the time.
+ */
+const EPSILON = 1e-9;
+
 export function scoreFor(target, guess) {
   const d = Math.abs(target - guess);
-  if (d <= BANDS.bullseye) return 4;
-  if (d <= BANDS.inner) return 3;
-  if (d <= BANDS.outer) return 2;
+  if (d <= BANDS.bullseye + EPSILON) return 4;
+  if (d <= BANDS.inner + EPSILON) return 3;
+  if (d <= BANDS.outer + EPSILON) return 2;
   return 0;
 }
 

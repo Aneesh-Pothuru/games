@@ -9,6 +9,7 @@ No app, no signup — one person starts a room, everyone else types four letters
 | Game | Players | Length | Based on |
 |---|---|---|---|
 | **Odd One Out** | 3–12 | 8–10 min/round | Spyfall |
+| **Nightfall** | 5–16 | 10–20 min | Werewolf / Mafia |
 | **The Council** | 5–10 | 25–45 min | Secret Hitler |
 | **Sabotage** | 5–10 | 20–30 min | The Resistance: Avalon |
 | **Spectrum** | 2–16 | 15–20 min | Wavelength |
@@ -22,14 +23,14 @@ habitually get wrong — see [Rules fidelity](#rules-fidelity).
 ```sh
 npm install
 npm run dev          # http://localhost:8787
-npm test             # 60 rules-engine unit tests, no deps
+npm test             # 90 rules-engine unit tests, no deps
 ```
 
 End-to-end, against a running `npm run dev`:
 
 ```sh
 npm run test:protocol   # HTTP + WebSocket + Durable Object, incl. leak checks
-npm run test:browser    # six real phone-sized browsers playing a game
+npm run test:browser    # six real phone-sized browsers playing two games
 ```
 
 `test:browser` needs `playwright` installed and a Chromium at
@@ -136,10 +137,33 @@ this codebase gets right:
 - The fail **count** is public; who played what never is.
 
 **Spectrum** (Wavelength)
+- **The five wedges are equal width.** The common misreading is that the bands
+  get progressively wider; the 2- and 3-point scores only cover more arc
+  because each appears twice, once per side. The rulebook never states the
+  angle in words — measuring the official artwork puts each wedge at ~7.45°,
+  rounded here to 7.5° (1/24 of the spectrum).
+- A dial landing exactly on a boundary scores the *higher* value. The band
+  edges are twenty-fourths, so an exact hit is never representable in binary
+  floating point — without an epsilon a dial on the line loses a point roughly
+  half the time.
 - The opposing team's left/right bet scores nothing when the psychic's team
   hits the bullseye.
 - The team going second starts on 1.
 - Score 4 while still behind and you immediately take another turn.
+
+**Nightfall** (Werewolf) — a folk game with no owner, so it keeps its name
+- Night actions are **collected then resolved in a single pass**, never
+  resolved at submit time. Deaths cascade through a FIFO queue so a Hunter's
+  shot chains deterministically, and the win check runs exactly once at the
+  end rather than mid-cascade.
+- The Seer's answer is delivered even if the target dies the same night —
+  alignment is static, so the result is order-independent.
+- Witch poison kills *through* the Doctor's protection: protection is against
+  the wolf attack only.
+- A save is never announced; the table learns only who died.
+- A deadlocked wolf pack kills nobody, and a tied day vote hangs nobody.
+- Wolves win at parity (`>=`), because from there they can always carry the
+  vote. Configurable to play-to-the-last-villager instead.
 
 ## Mobile
 

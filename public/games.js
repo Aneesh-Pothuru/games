@@ -1033,4 +1033,273 @@ function dialWidget(ctx, v) {
   ]);
 }
 
-export const GAME_UI = { council, oddoneout, sabotage, spectrum };
+
+// ---------------------------------------------------------------- nightfall --
+
+const NIGHT_TONE = { WOLF: 'var(--danger)', VILLAGE: 'var(--team-1)' };
+
+const nightfall = {
+  roleChip: (ctx) =>
+    ctx.view?.myRoleInfo
+      ? el('span', {
+          class: 'chip',
+          style: `color:${NIGHT_TONE[ctx.view.myTeam] ?? 'var(--text-2)'}`,
+        }, [ctx.view.myRoleInfo.name])
+      : null,
+
+  body(ctx) {
+    const v = ctx.view;
+    if (!v) return [waiting('Dealing…')];
+    const alive = ctx.room.players.filter((p) => v.alive[p.id]);
+    const roster = () => el('ul', { class: 'plist' }, ctx.room.players.map((p) =>
+      ctx.playerTile(ctx, p, {
+        state: v.alive[p.id] ? null : 'dead',
+        sub: !v.alive[p.id]
+          ? (v.deadRoles[p.id] ? ROLE_LABEL(v, p.id) : 'Dead')
+          : v.dayVoted.includes(p.id) ? 'Voted' : null,
+      })));
+
+    switch (v.phase) {
+      case 'reveal':
+        return [waiting('Everyone — pick up your phone.'),
+          roleCard({
+            kicker: v.myTeam === 'WOLF' ? 'Werewolf' : 'Village',
+            name: v.myRoleInfo.name, detail: v.myRoleInfo.desc, emblem: 'g-nightfall',
+            tone: NIGHT_TONE[v.myTeam],
+          }),
+          v.packmates.length
+            ? el('div', { class: 'card stack stack--tight' }, [
+                label('Your pack'),
+                ...v.packmates.map((id) => el('b', { text: ctx.nameOf(ctx, id) })),
+              ])
+            : el('div', { class: 'banner', text: 'You know nobody. Everything you learn, you learn out loud.' }),
+          el('div', { class: 'card stack stack--tight' }, [
+            label('Roles in this game'),
+            el('div', { class: 'row', style: 'flex-wrap:wrap' },
+              v.rolesInPlay.map((r) => el('span', { class: 'chip', text: r.toLowerCase() }))),
+          ])];
+
+      case 'night':
+        return [el('div', { class: 'banner banner--accent', text: `Night ${v.night}. Keep your voice down.` }),
+          ...nightActionFor(ctx, v), roster()];
+
+      case 'hunter':
+        return [
+          el('div', { class: 'banner banner--danger', text:
+            v.pendingHunter === ctx.me
+              ? 'You are down. Take someone with you.'
+              : `${ctx.nameOf(ctx, v.pendingHunter)} was the Hunter and is taking a shot.` }),
+          v.pendingHunter === ctx.me
+            ? pickList(ctx, { candidates: alive.filter((p) => p.id !== ctx.me).map((p) => p.id) })
+            : roster()];
+
+      case 'day': {
+        const dead = v.lastNight?.deaths ?? [];
+        return [
+          el('div', { class: `banner ${dead.length ? 'banner--danger' : 'banner--good'}` }, [
+            el('b', { text: dead.length
+              ? `${dead.map((id) => ctx.nameOf(ctx, id)).join(' and ')} died in the night.`
+              : 'Nobody died in the night.' }),
+          ]),
+          !v.amAlive && el('div', { class: 'banner', text: 'You are dead. Watch, enjoy, and say nothing.' }),
+          label('Who hangs?'),
+          pickList(ctx, {
+            candidates: v.amAlive ? alive.map((p) => p.id) : [],
+            stateFor: (p) => (v.alive[p.id] ? null : 'dead'),
+            subFor: (p) => (v.dayVoted.includes(p.id) ? 'Voted' : null),
+          }),
+          el('div', { class: 'label', text: `${v.dayVoted.length} of ${alive.length} voted` })];
+      }
+
+      case 'over': {
+        const won = v.over.winner === v.myTeam;
+        if (won) celebrate();
+        return [
+          outcomeBanner(
+            v.over.winner === 'VILLAGE' ? 'The village survives.' : 'The wolves take the village.',
+            won ? 'banner--good' : 'banner--danger'),
+          label('Everyone’s role'),
+          el('ul', { class: 'plist' }, ctx.room.players.map((p) =>
+            ctx.playerTile(ctx, p, {
+              sub: ROLE_INFO_NAME(v.reveal[p.id]),
+              state: v.alive[p.id] ? null : 'dead',
+            }))),
+        ];
+      }
+
+      default:
+        return [roster()];
+    }
+  },
+
+  bottom(ctx) {
+    const v = ctx.view;
+    if (!v) return bottom([]);
+    const pick = ctx.selected();
+
+    switch (v.phase) {
+      case 'reveal':
+        return readyBar(ctx, { acked: v.acked, onAck: () => ctx.send({ type: 'ack' }) });
+
+      case 'night':
+        return nightBottom(ctx, v, pick);
+
+      case 'hunter':
+        if (v.pendingHunter !== ctx.me) return waitingBar(`Waiting for ${ctx.nameOf(ctx, v.pendingHunter)}`);
+        return bottom([primary(pick ? `Take ${ctx.nameOf(ctx, pick)} with you` : 'Choose a target', {
+          disabled: !pick, danger: true,
+          onclick: () => ctx.send({ type: 'hunterShoot', target: pick }),
+        })]);
+
+      case 'day':
+        if (!v.amAlive) return waitingBar('The dead do not vote');
+        if (v.myDayVote) return waitingBar(`You voted for ${ctx.nameOf(ctx, v.myDayVote)}`);
+        return bottom([primary(pick ? `Vote to hang ${ctx.nameOf(ctx, pick)}` : 'Select someone', {
+          disabled: !pick, danger: true,
+          onclick: () => ctx.send({ type: 'dayVote', target: pick }),
+        })]);
+
+      case 'over':
+        return playAgainBar(ctx);
+
+      default:
+        return bottom([]);
+    }
+  },
+
+  options: (ctx, set) => [
+    toggleRow('Wolves win at parity', ctx.room.config.parityWin, (v) => set({ parityWin: v })),
+    toggleRow('Reveal roles on death', ctx.room.config.revealRoleOnDeath, (v) => set({ revealRoleOnDeath: v })),
+    toggleRow('No kill on the first night', ctx.room.config.noKillFirstNight, (v) => set({ noKillFirstNight: v })),
+  ],
+};
+
+const ROLE_NAMES = {
+  WOLF: 'Werewolf', VILLAGER: 'Villager', SEER: 'Seer',
+  DOCTOR: 'Doctor', HUNTER: 'Hunter', WITCH: 'Witch',
+};
+const ROLE_INFO_NAME = (role) => ROLE_NAMES[role] ?? role;
+const ROLE_LABEL = (v, id) => ROLE_INFO_NAME(v.deadRoles[id]);
+
+/** Only the roles with something to do at night get an action surface. */
+function nightActionFor(ctx, v) {
+  const alive = ctx.room.players.filter((p) => v.alive[p.id]);
+  const others = alive.filter((p) => p.id !== ctx.me);
+
+  if (!v.amAlive) return [el('div', { class: 'banner', text: 'You are dead. Enjoy the show.' })];
+
+  switch (v.myRole) {
+    case 'WOLF':
+      return [label('Agree on someone to take'),
+        v.packmates.length
+          ? el('div', { class: 'banner', text: `Your pack: ${v.packmates.map((id) => ctx.nameOf(ctx, id)).join(', ')}. You all have to agree.` })
+          : null,
+        pickList(ctx, {
+          candidates: alive.filter((p) => !v.packmates.includes(p.id) && p.id !== ctx.me).map((p) => p.id),
+          subFor: (p) => {
+            const voters = Object.entries(v.wolfVotes).filter(([, t]) => t === p.id).map(([w]) => ctx.nameOf(ctx, w));
+            return voters.length ? `${voters.join(', ')} wants this` : null;
+          },
+        })];
+
+    case 'SEER':
+      return [label('Check one player'),
+        pickList(ctx, { candidates: others.map((p) => p.id) }),
+        Object.keys(v.seerResults).length
+          ? el('div', { class: 'card stack stack--tight' }, [
+              label('What you know'),
+              ...Object.entries(v.seerResults).map(([id, isWolf]) =>
+                el('div', { class: 'row' }, [
+                  el('b', { text: ctx.nameOf(ctx, id) }),
+                  el('span', { style: `color:${isWolf ? 'var(--danger)' : 'var(--success)'}`,
+                    text: isWolf ? 'is a werewolf' : 'is not a werewolf' }),
+                ])),
+            ])
+          : null];
+
+    case 'DOCTOR':
+      return [label('Protect one player'),
+        v.lastProtected && el('div', { class: 'banner', text: `You protected ${ctx.nameOf(ctx, v.lastProtected)} last night — not them again.` }),
+        pickList(ctx, { candidates: alive.filter((p) => p.id !== v.lastProtected).map((p) => p.id) })];
+
+    case 'WITCH':
+      return [
+        v.witchVictim
+          ? el('div', { class: 'secret' }, [
+              label('The wolves have chosen'),
+              el('b', { class: 'secret__value', text: ctx.nameOf(ctx, v.witchVictim) }),
+            ])
+          : waiting('Waiting to see who the wolves choose.'),
+        el('div', { class: 'label', text:
+          `Potions left: ${v.witch.healUsed ? '' : 'heal'}${!v.witch.healUsed && !v.witch.poisonUsed ? ' + ' : ''}${v.witch.poisonUsed ? '' : 'poison'}` || 'none' }),
+        !v.witch.poisonUsed && v.witchVictim !== null
+          ? el('div', { class: 'stack stack--tight' }, [label('Poison someone (optional)'),
+              pickList(ctx, { candidates: alive.map((p) => p.id) })])
+          : null];
+
+    default:
+      return [waiting('You have nothing to do tonight. Sit tight and listen.')];
+  }
+}
+
+function nightBottom(ctx, v, pick) {
+  const submitted = {
+    WOLF: v.wolfVotes[ctx.me] !== undefined,
+    SEER: Object.keys(v.seerResults).length > 0 && v.phase === 'night',
+    DOCTOR: v.myDoctorTarget !== null,
+    WITCH: v.witchDone,
+  }[v.myRole];
+
+  if (!v.amAlive) return waitingBar('The night passes without you');
+
+  switch (v.myRole) {
+    case 'WOLF':
+      return bottom([primary(pick ? `Take ${ctx.nameOf(ctx, pick)}` : 'Choose a victim', {
+        disabled: !pick, danger: true,
+        onclick: () => ctx.send({ type: 'wolfKill', target: pick }),
+      })]);
+
+    case 'SEER':
+      if (submitted) return waitingBar('Checked — waiting for the night to pass');
+      return bottom([primary(pick ? `Check ${ctx.nameOf(ctx, pick)}` : 'Choose someone to check', {
+        disabled: !pick, onclick: () => ctx.send({ type: 'inspect', target: pick }),
+      })]);
+
+    case 'DOCTOR':
+      if (submitted) return waitingBar('Protected — waiting for the night to pass');
+      return bottom([primary(pick ? `Protect ${ctx.nameOf(ctx, pick)}` : 'Choose someone to protect', {
+        disabled: !pick, onclick: () => ctx.send({ type: 'protect', target: pick }),
+      })]);
+
+    case 'WITCH': {
+      if (submitted) return waitingBar('Waiting for the night to pass');
+      if (v.witchVictim === null) return waitingBar('Waiting for the wolves');
+      // Saving is the affirmative move, so it takes the primary slot; poison
+      // is the destructive one and reads as danger. Every branch keeps exactly
+      // one primary so the bar is never just a row of grey options.
+      return bottom([
+        !v.witch.healUsed
+          ? primary(`Save ${ctx.nameOf(ctx, v.witchVictim)}`, {
+              onclick: () => ctx.send({ type: 'witch', heal: true, poison: null }),
+            })
+          : primary(pick ? `Poison ${ctx.nameOf(ctx, pick)}` : 'Choose someone to poison', {
+              disabled: !pick || v.witch.poisonUsed, danger: true,
+              onclick: () => ctx.send({ type: 'witch', heal: false, poison: pick }),
+            }),
+        !v.witch.healUsed && pick && !v.witch.poisonUsed && el('button', {
+          class: 'btn btn--danger btn--block',
+          onclick: () => ctx.send({ type: 'witch', heal: false, poison: pick }),
+        }, [`Poison ${ctx.nameOf(ctx, pick)}`]),
+        el('button', {
+          class: 'btn btn--ghost btn--block',
+          onclick: () => ctx.send({ type: 'witch', heal: false, poison: null }),
+        }, ['Do nothing tonight']),
+      ]);
+    }
+
+    default:
+      return waitingBar('Waiting for the night to pass');
+  }
+}
+
+export const GAME_UI = { council, oddoneout, sabotage, spectrum, nightfall };

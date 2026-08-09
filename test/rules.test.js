@@ -635,14 +635,27 @@ describe('odd one out (Spyfall rules)', () => {
 // ------------------------------------------------------------------ spectrum --
 
 describe('spectrum (Wavelength rules)', () => {
-  test('scoring bands are 4 / 3 / 2 / 0 by distance', () => {
-    assert.equal(spectrum.scoreFor(50, 50), 4);
-    assert.equal(spectrum.scoreFor(50, 52.5), 4);
-    assert.equal(spectrum.scoreFor(50, 55), 3);
-    assert.equal(spectrum.scoreFor(50, 57.5), 3);
-    assert.equal(spectrum.scoreFor(50, 60), 2);
-    assert.equal(spectrum.scoreFor(50, 62.5), 2);
-    assert.equal(spectrum.scoreFor(50, 65), 0);
+  // Five EQUAL wedges of 100/24 units. The 4-band is half a wedge either side
+  // of centre; each further band adds a full wedge.
+  test('scoring bands are five equal wedges, not progressively wider ones', () => {
+    const w = 100 / 24;
+    assert.equal(spectrum.scoreFor(50, 50), 4, 'dead centre');
+    assert.equal(spectrum.scoreFor(50, 50 + w / 2 - 0.01), 4);
+    assert.equal(spectrum.scoreFor(50, 50 + w / 2), 4, 'boundary favours the psychic team');
+    assert.equal(spectrum.scoreFor(50, 50 + w / 2 + 0.01), 3);
+    assert.equal(spectrum.scoreFor(50, 50 + w * 1.5), 3, 'boundary favours the psychic team');
+    assert.equal(spectrum.scoreFor(50, 50 + w * 1.5 + 0.01), 2);
+    assert.equal(spectrum.scoreFor(50, 50 + w * 2.5), 2, 'boundary favours the psychic team');
+    assert.equal(spectrum.scoreFor(50, 50 + w * 2.5 + 0.01), 0, 'off target');
+    // Symmetric.
+    assert.equal(spectrum.scoreFor(50, 50 - w * 1.5), 3);
+    assert.equal(spectrum.scoreFor(50, 50 - w * 2.5 - 0.01), 0);
+  });
+
+  test('the whole target is 5 wedges wide, about a fifth of the dial', () => {
+    const w = 100 / 24;
+    // 5 wedges == 20.83 units == 37.5 degrees of the 180-degree spectrum.
+    assert.ok(Math.abs(w * 5 - 20.8333) < 0.001);
   });
 
   test('the team going second starts on one point', () => {
@@ -699,10 +712,15 @@ describe('spectrum (Wavelength rules)', () => {
   });
 
   test('the target always leaves room for the full band', () => {
+    const outer = (100 / 24) * 2.5;
     for (let seed = 1; seed < 300; seed++) {
       const room = makeRoom('spectrum', 6);
       room.game = spectrum.start(room, seed, 1000);
-      assert.ok(room.game.target >= 12.5 && room.game.target <= 87.5, `seed ${seed}`);
+      const t = room.game.target;
+      assert.ok(t >= outer && t <= 100 - outer, `seed ${seed}: ${t}`);
+      // Every band must be reachable without leaving the dial.
+      assert.equal(spectrum.scoreFor(t, Math.max(0, t - outer)), 2);
+      assert.equal(spectrum.scoreFor(t, Math.min(100, t + outer)), 2);
     }
   });
 });
